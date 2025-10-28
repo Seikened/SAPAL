@@ -208,7 +208,7 @@ plt.ylabel("Porcentaje del costo mensual total (%)")
 plt.title(f"Distribución del costo mensual en la toma de decisiones ({HORAS_AL_MES}h/mes)")
 plt.grid(axis="y", linestyle="--", alpha=0.5)
 plt.tight_layout()
-plt.show()
+#plt.show()
 
 # %%
 import matplotlib.pyplot as plt
@@ -230,7 +230,7 @@ plt.title(f"Costo mensual de decisión por rol\n(asumiendo {HORAS_AL_MES} h/mes 
 plt.gca().invert_yaxis()
 plt.grid(axis="x", linestyle="--", alpha=0.4)
 plt.tight_layout()
-plt.show()
+#plt.show()
 
 # %%
 import matplotlib.pyplot as plt
@@ -250,33 +250,137 @@ plt.title("Factor de importancia del rol en la toma de decisiones")
 plt.gca().invert_yaxis()
 plt.grid(axis="x", linestyle="--", alpha=0.4)
 plt.tight_layout()
-plt.show()
+#plt.show()
 
 # %%
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Base anual (lo que ya calculaste)
-costo_anual_base = estimador_costo_decisiones_por_años(df, horas_dedicadas=HORAS_AL_MES, años=1)
+# === Datos base ===
+# Partimos de tus variables actuales
+costo_anual_base = estimador_costo_decisiones_por_años(
+    df, horas_dedicadas=HORAS_AL_MES, años=1
+)
 
-# Escenarios a 5 años con diferentes reducciones
 anios = np.arange(1, num_años + 1)
+
+# === Escenarios de ahorro ===
 escenarios = {
-    "Sin cambio (0%)": costo_anual_base * anios,
-    "Reducción 25%": costo_anual_base * 0.75 * anios,
-    "Reducción 50%": costo_anual_base * 0.50 * anios,
-    "Reducción 75%": costo_anual_base * 0.25 * anios,
+    "Escenario 0% de ahorro": costo_anual_base * anios,           # Peor caso
+    "Escenario 25% de ahorro": costo_anual_base * 0.75 * anios,   # Ahorro leve
+    "Escenario 50% de ahorro": costo_anual_base * 0.50 * anios,   # Ahorro medio
+    "Escenario 75% de ahorro": costo_anual_base * 0.25 * anios,   # Ahorro alto
 }
 
-plt.figure(figsize=(10,6))
-for label, valores in escenarios.items():
-    plt.plot(anios, valores / 1e6, marker="o", label=label)  # en millones
+# === Colores manuales coherentes con los escenarios ===
+colores = {
+    "Escenario 0% de ahorro":   "#4A4A4A",  # gris oscuro = nada mejora, seguimos quemando
+    "Escenario 25% de ahorro":  "#4F6FAE",  # azul sobrio / control financiero inicial
+    "Escenario 50% de ahorro":  "#2F5FC3",  # azul más intenso / eficiencia clara
+    "Escenario 75% de ahorro":  "#2E8B57",  # verde (tipo verde bosque) / retorno fuerte
+}
 
-plt.title("Proyección de costo acumulado a 5 años")
-plt.xlabel("Años")
-plt.ylabel("Costo acumulado (millones MXN)")
+# === Gráfico ===
+plt.figure(figsize=(10, 6))
+
+for label, valores in escenarios.items():
+    plt.plot(
+        anios,
+        valores / 1e6,  # en millones
+        marker="o",
+        linewidth=2.5,
+        color=colores[label],
+        label=label
+    )
+
+plt.title(
+    f"Evolución del costo acumulado de tiempo directivo en la toma de decisiones\n"
+    f"(Horizonte: {num_años} año(s), {HORAS_AL_MES} h/mes dedicadas a decidir)"
+)
+plt.xlabel("Año")
+plt.ylabel("Costo acumulado (millones de MXN)")
+
+# === Ajustes visuales ===
 plt.grid(True, linestyle="--", alpha=0.4)
-plt.legend()
+plt.legend(
+    title="Escenarios de eficiencia operativa",
+    frameon=False,
+    loc="upper left"
+)
+
+# Resaltamos visualmente el eje 0
+plt.axhline(y=0, color="black", linewidth=0.8)
+
+plt.tight_layout()
+#plt.show()
+
+# %%
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.interpolate import make_interp_spline
+
+# ==============================
+# Cálculos base (tus funciones)
+# ==============================
+costo_anual_base = estimador_costo_decisiones_por_años(df, horas_dedicadas=HORAS_AL_MES, años=1)
+anios = np.arange(1, num_años + 1)
+
+# Escenarios de ahorro (en millones MXN)
+escenarios = {
+    "Ahorro 25%": costo_anual_base * (1 - 0.25) * anios,
+    "Ahorro 50%": costo_anual_base * (1 - 0.50) * anios,
+    "Ahorro 75%": costo_anual_base * (1 - 0.75) * anios,
+}
+
+# Costo sin ahorro (referencia)
+costo_sin_ahorro = costo_anual_base * anios
+
+# Calcular ahorro acumulado = costo sin ahorro - costo con ahorro
+data = []
+for label, valores in escenarios.items():
+    ahorro = (costo_sin_ahorro - valores) / 1e6  # millones de MXN
+    for año, val in zip(anios, ahorro):
+        data.append({"Año": año, "Ahorro (millones MXN)": val, "Escenario": label})
+
+df_plot = pd.DataFrame(data)
+
+# ==============================
+# Visualización con Seaborn
+# ==============================
+sns.set_theme(style="whitegrid", font_scale=1.1)
+palette = {
+    "Ahorro 25%": "#6BBF59",  # verde medio
+    "Ahorro 50%": "#4CAF50",  # verde principal
+    "Ahorro 75%": "#2E7D32",  # verde oscuro
+}
+
+plt.figure(figsize=(10, 6))
+
+# Curvas suavizadas
+for esc in df_plot["Escenario"].unique():
+    subset = df_plot[df_plot["Escenario"] == esc]
+    x_smooth = np.linspace(subset["Año"].min(), subset["Año"].max(), 200)
+    spline = make_interp_spline(subset["Año"], subset["Ahorro (millones MXN)"], k=2)
+    y_smooth = spline(x_smooth)
+    plt.plot(
+        x_smooth, y_smooth,
+        label=esc,
+        color=palette[esc],
+        linewidth=2.5
+    )
+
+# Línea base (sin ahorro)
+plt.axhline(0, color="#555", linewidth=1.2, linestyle="--")
+
+plt.title(
+    f"Evolución del ahorro acumulado por eficiencia operativa\n"
+    f"(Horizonte: {num_años} año(s), {HORAS_AL_MES} h/mes en toma de decisiones)"
+)
+plt.xlabel("Año")
+plt.ylabel("Ahorro acumulado (millones de MXN)")
+plt.legend(title="Escenarios de eficiencia", frameon=False, loc="upper left")
 plt.tight_layout()
 plt.show()
 
