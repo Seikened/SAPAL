@@ -1,14 +1,14 @@
 // components/sector-grid.tsx
 "use client";
 import { useState, useMemo } from "react";
-import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SectorDetail } from "@/components/sector-detail";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import type { SectorsResponse, SectorItem } from "@/lib/api";
 import { usePoll } from "@/hooks/use-poll";
+import { AnimatedCard } from "@/components/ui/animated-card";
 
-type SectorStatus = "normal" | "warning" | "critical";
+type VisualLevel = "normal" | "warning" | "critical";
 
 export function SectorGrid() {
   const data = usePoll<SectorsResponse>("/sim/sectors", 10_000);
@@ -17,33 +17,39 @@ export function SectorGrid() {
 
   const mapped = useMemo(() => {
     return sectors.map((s) => {
-      let status: SectorStatus = "normal";
-      if (s.estado === "alerta") status = "warning";
-      if (s.estado === "critico") status = "critical";
       const trend =
         s.tendencia.length >= 2
-          ? s.tendencia[s.tendencia.length - 1] > s.tendencia[0]
+          ? s.tendencia.at(-1)! > s.tendencia[0]
             ? "up"
-            : s.tendencia[s.tendencia.length - 1] < s.tendencia[0]
+            : s.tendencia.at(-1)! < s.tendencia[0]
             ? "down"
             : "stable"
           : "stable";
-      return { ...s, status, trend };
+
+      // “estado” ya viene calculado por backend: "normal" | "alerta" | "critico"
+      const level: VisualLevel = s.estado === "critico" ? "critical" : s.estado === "alerta" ? "warning" : "normal";
+      return { ...s, trend, level };
     });
   }, [sectors]);
 
-  const getStatusColor = (status: SectorStatus) =>
-    status === "normal"
-      ? "bg-success/10 border-success text-success"
-      : status === "warning"
-      ? "bg-warning/10 border-warning text-warning"
-      : "bg-destructive/10 border-destructive text-destructive";
+  const statusChip = (level: VisualLevel) =>
+    level === "normal" ? (
+      <Badge variant="outline" className="bg-success/10 border-success text-success text-xs font-medium">Normal</Badge>
+    ) : level === "warning" ? (
+      <Badge variant="outline" className="bg-warning/10 border-warning text-warning text-xs font-medium">Alerta</Badge>
+    ) : (
+      <Badge variant="outline" className="bg-destructive/10 border-destructive text-destructive text-xs font-medium">Crítico</Badge>
+    );
 
-  const getStatusLabel = (status: SectorStatus) =>
-    status === "normal" ? "Normal" : status === "warning" ? "Alerta" : "Crítico";
+  const cardBorderClasses = (level: VisualLevel) =>
+    level === "normal"
+      ? "border-success/40 hover:border-success"
+      : level === "warning"
+      ? "border-warning/60 hover:border-warning"
+      : "border-destructive/70 hover:border-destructive";
 
   const getTrendIcon = (trend: "up" | "down" | "stable") =>
-    trend === "up" ? <TrendingUp className="h-4 w-4" /> : trend === "down" ? <TrendingDown className="h-4 w-4" /> : <Minus className="h-4 w-4" />;
+    trend === "up" ? <TrendingUp className="h-4 w-4 opacity-80" /> : trend === "down" ? <TrendingDown className="h-4 w-4 opacity-80" /> : <Minus className="h-4 w-4 opacity-60" />;
 
   return (
     <>
@@ -59,16 +65,18 @@ export function SectorGrid() {
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           {mapped.map((sector) => (
-            <Card
+            <AnimatedCard
               key={sector.id}
-              className={`p-4 cursor-pointer transition-all hover:shadow-md border-2 ${getStatusColor(sector.status)}`}
+              level={sector.level}
+              aria-label={`Sector ${sector.nombre} estado ${sector.level}`}
+              className={`border-2 rounded-2xl ${cardBorderClasses(sector.level)}`}
               onClick={() => setSelected(sector)}
             >
-              <div className="space-y-2">
+              <div className="p-4 space-y-2">
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="font-heading font-semibold text-sm tracking-tight">{sector.nombre}</p>
-                    <p className="text-xs opacity-80 font-medium">{getStatusLabel(sector.status)}</p>
+                    <div className="mt-1">{statusChip(sector.level)}</div>
                   </div>
                   {getTrendIcon(sector.trend)}
                 </div>
@@ -90,7 +98,7 @@ export function SectorGrid() {
                   </div>
                 )}
               </div>
-            </Card>
+            </AnimatedCard>
           ))}
         </div>
       </div>
