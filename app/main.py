@@ -1,3 +1,4 @@
+# app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
@@ -5,26 +6,35 @@ from contextlib import asynccontextmanager
 
 from .db import init_db
 from .routers.sim import router as sim_router
-from .services.sim import start_background_simulation, stop_background_simulation
+from .services.sim import iniciar_simulacion_segundo_plano, detener_simulacion_segundo_plano
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Se ejecuta al iniciar y cerrar la app."""
+    """
+    Ciclo de vida de la aplicación.
+
+    Al iniciar:
+      - Inicializa la base de datos (tablas si no existen).
+      - Arranca la simulación en segundo plano (genera lecturas y alertas sintéticas).
+
+    Al apagar:
+      - Detiene la simulación en segundo plano limpiamente.
+    """
     init_db()
-    await start_background_simulation()
+    await iniciar_simulacion_segundo_plano()
     try:
         yield
     finally:
-        await stop_background_simulation()
+        await detener_simulacion_segundo_plano()
 
 
 app = FastAPI(title="SAPAL Dashboard API", version="0.1.0", lifespan=lifespan)
 
-# Configuración de CORS
+# CORS abierto para demo; en producción limita dominios.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Puedes limitar a dominios específicos si quieres
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -33,15 +43,19 @@ app.add_middleware(
 
 @app.get("/", include_in_schema=False)
 async def root():
+    """Redirige a la documentación interactiva de FastAPI."""
     return RedirectResponse(url="/docs")
 
 
-@app.get("/health", tags=["Health"])
+@app.get("/health", tags=["Salud"])
 async def health_check():
-    """Ruta simple para verificar que el servicio esté vivo."""
+    """
+    Verificación rápida de salud del servicio.
+    Devuelve 'healthy' si la API está lista.
+    """
     mensaje = "Dashboard de SAPAL 💧 funcionando correctamente. 🚀"
     return {"status": "healthy", "message": mensaje}
 
 
-# Registrar el router principal
+# Rutas principales de la simulación / tablero
 app.include_router(sim_router, prefix="/sim", tags=["Simulacion"])

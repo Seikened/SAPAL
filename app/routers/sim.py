@@ -1,61 +1,99 @@
 # app/routers/sim.py
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi import Request
-from fastapi.responses import StreamingResponse
-from sqlmodel import Session
-from ..db import get_session
-from ..schemas import KPIResponse, SectorsResponse, AlertsResponse, AckRequest, AckResponse, AlertRead, SectorCard
-from ..services import sim as svc
-from datetime import datetime, timezone
 import json
-import asyncio
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
+
+from ..schemas import (
+    KPIResponse,
+    SectorsResponse,
+    AlertsResponse,
+    AckRequest,
+    AckResponse,
+)
+# Importa el servicio y usa los nombres en español:
+from ..services import sim as servicios_sim
 
 router = APIRouter()
 
+
 @router.get("/kpis/current", response_model=KPIResponse)
-def kpis_current():
-    data = svc.compute_kpis()
-    return dict(
-        ts=data["ts"],
-        eficiencia=round(data["eficiencia"], 3),
-        tiempo_decision_min=data["tiempo_decision_min"],
-        uso_datos_pct=round(data["uso_datos_pct"], 2),
-        sectores_en_riesgo=data["sectores_en_riesgo"],
-    )
+def obtener_kpis_actuales():
+    """
+    Devuelve los KPIs del encabezado del tablero.
+    """
+    datos = servicios_sim.calcular_kpis()
+    return {
+        "ts": datos["ts"],
+        "eficiencia": round(datos["eficiencia"], 3),
+        "tiempo_decision_min": datos["tiempo_decision_min"],
+        "uso_datos_pct": round(datos["uso_datos_pct"], 2),
+        "sectores_en_riesgo": datos["sectores_en_riesgo"],
+    }
+
 
 @router.get("/sectors", response_model=SectorsResponse)
-def sectors():
-    items = svc.sectors_grid()
-    return {"items": items}
+def obtener_sectores():
+    """
+    Devuelve la cuadrícula de sectores para el dashboard.
+    """
+    elementos = servicios_sim.construir_cuadricula_sectores()
+    return {"items": elementos}
+
 
 @router.get("/alerts", response_model=AlertsResponse)
-def alerts(status: str = "abierta"):
-    items = svc.list_alerts(status=status)
-    return {"items": items}
+def obtener_alertas(estado: str = "abierta"):
+    """
+    Devuelve el listado de alertas filtrado por estado.
+    """
+    elementos = servicios_sim.listar_alertas(estado=estado)
+    return {"items": elementos}
 
-@router.post("/alerts/{alert_id}/ack", response_model=AckResponse)
-def alerts_ack(alert_id: int, body: AckRequest):
-    # validación mínima de PIN para demo
-    if body.pin != "123456":
+
+@router.post("/alerts/{id_alerta}/ack", response_model=AckResponse)
+def marcar_alerta_como_atendida(id_alerta: int, cuerpo: AckRequest):
+    """
+    Marca una alerta como 'atendida' (ACK) validando un PIN de demostración.
+    """
+    if cuerpo.pin != "2131":
         raise HTTPException(status_code=403, detail="PIN inválido")
-    res = svc.acknowledge_alert(alert_id, user_email="operador@sapal.mx", nota=body.nota)
-    if not res:
+
+    resultado = servicios_sim.atender_alerta(
+        id_alerta=id_alerta,
+        correo_usuario="operador@sapal.mx",
+        nota=cuerpo.nota,
+    )
+    if not resultado:
         raise HTTPException(status_code=404, detail="Alerta no encontrada o ya atendida")
-    return res
+    return resultado
+
 
 @router.get("/events/stream")
-async def events_stream(request: Request):
-    async def event_generator():
-        # primer “hola” para enganchar
-        yield f"data: {json.dumps({'type':'hello','payload':{'ts':datetime.now(timezone.utc).isoformat()}})}\n\n"
-        async for payload in svc.subscribe():
+async def flujo_eventos(request: Request):
+    """
+    Server-Sent Events (SSE) para “tiempo real”.
+
+    Envía:
+      - {'type':'hello', 'payload':{'ts':...}} al conectar.
+      - {'type':'tick',  'payload':{'ts':...}} cada intervalo.
+      - {'type':'alert', 'payload':{id, sector_id, nivel, tipo, ts}} por alerta.
+    """
+    async def generador_eventos():
+        saludo_inicial = {
+            "type": "hello",
+            "payload": {"ts": datetime.now(timezone.utc).isoformat()}
+        }
+        yield f"data: {json.dumps(saludo_inicial)}\n\n"
+
+        async for paquete in servicios_sim.suscribirse_eventos():
             if await request.is_disconnected():
                 break
-            yield f"data: {json.dumps(payload)}\n\n"
+            yield f"data: {json.dumps(paquete)}\n\n"
 
-    headers = {
+    cabeceras = {
         "Cache-Control": "no-cache",
         "Content-Type": "text/event-stream",
         "Connection": "keep-alive",
     }
-    return StreamingResponse(event_generator(), headers=headers)
+    return StreamingResponse(generador_eventos(), headers=cabeceras)
