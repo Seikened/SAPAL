@@ -6,7 +6,7 @@ import random
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,28 @@ from sqlmodel import select
 
 from ..db import SessionLocal
 from ..models import ActionLog, Alert, Reading, Sector
+
+
+# ─────────────────────────────────────────────────────────────
+# Parámetros de simulación y reglas (ajustados)
+# ─────────────────────────────────────────────────────────────
+INCIDENT_PROB = 0.002           # antes 0.01
+INCIDENT_TICKS = (2, 4)         # antes (3, 6)
+REQUIRE_CONSEC_TICKS = 4        # antes 2
+PRESSURE_JUMP = 0.25            # antes 0.20
+NO_FACT_THRESHOLD = 0.20        # antes 0.15
+ALERT_COOLDOWN_MIN = 15         # minutos
+
+# deduplicación por ventana de tiempo (sector,tipo) → último ts
+_ULTIMA_ALERTA: Dict[Tuple[int, str], datetime] = {}
+
+def _puedo_emitir(sector_id: int, tipo: str, ahora: datetime) -> bool:
+    clave = (sector_id, tipo)
+    ts = _ULTIMA_ALERTA.get(clave)
+    if ts and (ahora - ts) < timedelta(minutes=ALERT_COOLDOWN_MIN):
+        return False
+    _ULTIMA_ALERTA[clave] = ahora
+    return True
 
 
 # ─────────────────────────────────────────────────────────────
@@ -100,7 +122,7 @@ def _crear_perfiles(ids: List[int]) -> Dict[int, dict]:
 
 def _levanta_incidente(si: int, instante: datetime, intervalo: int):
     tipo = random.choice(["fuga", "sobrepresion", "baja_disponibilidad"])
-    dur_ticks = random.randint(3, 6)  # 30–60s si intervalo=10
+    dur_ticks = random.randint(*INCIDENT_TICKS)  # antes (3,6)
     _INCIDENTES[si] = {
         "tipo": tipo,
         "intensidad": random.uniform(0.5, 1.0),
@@ -114,15 +136,12 @@ def simular_lectura(
     proceso_consumo: ProcesoAR1,
     proceso_presion: ProcesoAR1,
 ) -> dict:
-    # Demanda objetivo (consumo) con estacionalidad y sesgo por sector
     est = factor_estacional_por_hora(instante)
     perfil = _PERFILES[id_sector]
     demanda = 110.0 * est * perfil["season_bias"]
 
-    # Pérdida base por sector
     loss_base = demanda * perfil["loss_base"]
 
-    # Incidente activo modifica demanda/pérdida/presión
     incidente = _INCIDENTES.get(id_sector)
     demanda_mod = demanda
     loss_extra = 0.0
@@ -139,14 +158,10 @@ def simular_lectura(
         elif incidente["tipo"] == "sobrepresion":
             presion_nominal = pnom * (1.25 + random.gauss(0, 0.03))
 
-    # Consumo con pequeño ruido
     consumo_obj = max(0.001, demanda_mod * (1.0 + random.gauss(0, 0.02)))
-    # Pérdida total
     perdida = max(0.0, loss_base + loss_extra)
-    # Inyección = consumo + pérdida
     inyeccion_obj = max(consumo_obj + perdida, 0.001)
 
-    # Pasar por AR(1) para suavidad temporal
     inyeccion = max(0.0, proceso_inyeccion.siguiente(inyeccion_obj))
     consumo = max(0.001, proceso_consumo.siguiente(consumo_obj))
     presion = max(5.0, proceso_presion.siguiente(presion_nominal))
@@ -172,70 +187,71 @@ def evaluar_reglas_alertas(
     media_eficiencia = media_mov_eficiencia.actualizar(lectura.eficiencia)
     media_presion = media_mov_presion.actualizar(lectura.presion_psi)
 
-    # Eficiencia operativa (consumo/inyección) y pérdida relativa
     eficiencia_operativa = lectura.consumo_m3 / max(lectura.inyeccion_m3, 0.001)
     loss_pct = max(0.0, lectura.inyeccion_m3 - lectura.consumo_m3) / lectura.consumo_m3
 
-    # 1) Baja eficiencia operativa sostenida
+    # histeresis: si está mal, suma; si está bien, baja 1 sin resetear en seco
     if eficiencia_operativa < 0.85:
         conteo_baja_eficiencia[lectura.sector_id] += 1
     else:
-        conteo_baja_eficiencia[lectura.sector_id] = 0
+        conteo_baja_eficiencia[lectura.sector_id] = max(0, conteo_baja_eficiencia[lectura.sector_id] - 1)
 
-    if conteo_baja_eficiencia[lectura.sector_id] >= 2:
-        detalle = {
-            "base": "historial_propio",
-            "caracteristica": "eficiencia_operativa",
-            "valor": eficiencia_operativa,
-            "umbral": 0.85,
-        }
-        alertas.append(Alert(
-            sector_id=lectura.sector_id,
-            nivel="alta",
-            tipo="baja_eficiencia",
-            mensaje="Eficiencia operativa < 85% sostenida (≥2 ventanas).",
-            explicacion=json.dumps(detalle),
-        ))
+    # 1) Baja eficiencia sostenida
+    if conteo_baja_eficiencia[lectura.sector_id] >= REQUIRE_CONSEC_TICKS:
+        if _puedo_emitir(lectura.sector_id, "baja_eficiencia", lectura.ts):
+            detalle = {
+                "base": "historial_propio",
+                "caracteristica": "eficiencia_operativa",
+                "valor": eficiencia_operativa,
+                "umbral": 0.85,
+            }
+            alertas.append(Alert(
+                sector_id=lectura.sector_id,
+                nivel="alta",
+                tipo="baja_eficiencia",
+                mensaje=f"Eficiencia operativa < 85% sostenida (≥{REQUIRE_CONSEC_TICKS} ventanas).",
+                explicacion=json.dumps(detalle),
+            ))
 
-    # 2) Presión desviada ±20% vs EWMA
-    if media_presion and abs(lectura.presion_psi - media_presion) / media_presion > 0.20:
-        detalle = {
-            "base": "historial_propio",
-            "caracteristica": "presion",
-            "valor": lectura.presion_psi,
-            "media": media_presion,
-        }
-        alertas.append(Alert(
-            sector_id=lectura.sector_id,
-            nivel="media",
-            tipo="sobrepresion",
-            mensaje="Presión ±20% vs su histórico (EWMA).",
-            explicacion=json.dumps(detalle),
-        ))
+    # 2) Presión desviada ±25% vs EWMA
+    if media_presion and abs(lectura.presion_psi - media_presion) / media_presion > PRESSURE_JUMP:
+        if _puedo_emitir(lectura.sector_id, "sobrepresion", lectura.ts):
+            detalle = {
+                "base": "historial_propio",
+                "caracteristica": "presion",
+                "valor": lectura.presion_psi,
+                "media": media_presion,
+            }
+            alertas.append(Alert(
+                sector_id=lectura.sector_id,
+                nivel="media",
+                tipo="sobrepresion",
+                mensaje=f"Presión ±{int(PRESSURE_JUMP*100)}% vs su histórico (EWMA).",
+                explicacion=json.dumps(detalle),
+            ))
 
-    # 3) No facturable alto > 15%
-    if loss_pct > 0.15:
-        detalle = {
-            "base": "historial_propio",
-            "caracteristica": "no_facturable_pct",
-            "valor": loss_pct,
-            "umbral": 0.15,
-        }
-        alertas.append(Alert(
-            sector_id=lectura.sector_id,
-            nivel="alta",
-            tipo="no_facturable",
-            mensaje="Consumo no facturable > 15% respecto a consumo.",
-            explicacion=json.dumps(detalle),
-        ))
+    # 3) No facturable alto > 20%
+    if loss_pct > NO_FACT_THRESHOLD:
+        if _puedo_emitir(lectura.sector_id, "no_facturable", lectura.ts):
+            detalle = {
+                "base": "historial_propio",
+                "caracteristica": "no_facturable_pct",
+                "valor": loss_pct,
+                "umbral": NO_FACT_THRESHOLD,
+            }
+            alertas.append(Alert(
+                sector_id=lectura.sector_id,
+                nivel="alta",
+                tipo="no_facturable",
+                mensaje=f"Consumo no facturable > {int(NO_FACT_THRESHOLD*100)}% respecto a consumo.",
+                explicacion=json.dumps(detalle),
+            ))
 
     return alertas
 
 # ─────────────────────────────────────────────────────────────
 # Funciones llamadas por las rutas
 # ─────────────────────────────────────────────────────────────
-
-
 async def calcular_kpis() -> dict:
     """
     Calcula KPIs:
@@ -245,7 +261,6 @@ async def calcular_kpis() -> dict:
       - alertas_atendidas_24h: conteo en las últimas 24h
     """
     async with contexto_sesion() as sesion:
-        # Trae lecturas recientes (500 suele bastar para 16 ticks x ~8 sectores)
         res = await sesion.execute(
             select(Reading).order_by(Reading.ts.desc()).limit(500)
         )
@@ -262,29 +277,24 @@ async def calcular_kpis() -> dict:
                 tiempo_decision_min=12,
             )
 
-        # Agrupa por ts exacto (cada tick inserta una lectura por sector con el mismo ts)
         por_ts: dict[datetime, list[float]] = defaultdict(list)
         for l in lecturas:
             por_ts[l.ts].append(float(l.eficiencia))
 
-        # Orden cronológico (asc) y promedios por tick
         ts_ordenados = sorted(por_ts.keys())
-        proms = [sum(vals)/len(vals) for t, vals in sorted(por_ts.items())]
+        proms = [sum(vals)/len(vals) for _, vals in sorted(por_ts.items())]
 
-        # Últimos N puntos para la sparkline
         N = 16
         eficiencia_trend = proms[-N:] if len(proms) > N else proms
         eficiencia = eficiencia_trend[-1]
         ts_reciente = ts_ordenados[-1].isoformat()
 
-        # Sectores en riesgo = sectores con alertas abiertas
         q_abiertas = await sesion.execute(
             select(Alert).where(Alert.estado == "abierta")
         )
         alertas_abiertas = q_abiertas.scalars().all()
         sectores_en_riesgo = len({a.sector_id for a in alertas_abiertas})
 
-        # Atendidas últimas 24h
         hace_24 = datetime.now(timezone.utc) - timedelta(hours=24)
         atendidas_24h = await sesion.execute(
             select(func.count(Alert.id)).where(
@@ -325,14 +335,12 @@ async def construir_cuadricula_sectores() -> List[dict]:
             presion_actual = float(lectura_reciente.presion_psi)
             loss_pct = float(max(0.0, lectura_reciente.inyeccion_m3 - lectura_reciente.consumo_m3) / lectura_reciente.consumo_m3)
 
-            # estado por reglas simples
             estado = "normal"
             if loss_pct > 0.12 or eficiencia_operativa < 0.9:
                 estado = "alerta"
             if loss_pct > 0.2 or eficiencia_operativa < 0.85:
                 estado = "critico"
 
-            # alertas abiertas
             res_cnt = await sesion.execute(
                 select(func.count(Alert.id)).where(
                     Alert.sector_id == sector.id,
@@ -346,8 +354,8 @@ async def construir_cuadricula_sectores() -> List[dict]:
             salida.append({
                 "id": sector.id,
                 "nombre": sector.nombre,
-                "estado": estado,  # "normal" | "alerta" | "critico"
-                "eficiencia": round(eficiencia_operativa, 3),   # 0..1 en UI tú lo formateas a %
+                "estado": estado,
+                "eficiencia": round(eficiencia_operativa, 3),
                 "presion_psi": round(presion_actual, 1),
                 "alertas_abiertas": int(cantidad_alertas_abiertas),
                 "tendencia": tendencia,
@@ -446,7 +454,6 @@ async def _bucle_simulacion():
     ids_sectores = await asegurar_sectores_semilla()
     estado = EstadoSimulacion(ids_sectores)
 
-    # Perfiles por sector e incidentes
     global _PERFILES, _INCIDENTES
     _PERFILES = _crear_perfiles(ids_sectores)
     _INCIDENTES = {}
@@ -455,7 +462,6 @@ async def _bucle_simulacion():
     procesos_consumo   = {sid: ProcesoAR1(0.7, 5.0, 110.0) for sid in ids_sectores}
     procesos_presion   = {sid: ProcesoAR1(0.6, 1.5, _PERFILES[sid]["pressure_nom"]) for sid in ids_sectores}
 
-    # Bootstrap inicial para que el dashboard no arranque vacío
     ahora = datetime.now(timezone.utc)
     async with contexto_sesion() as sesion:
         async with sesion.begin():
@@ -471,12 +477,10 @@ async def _bucle_simulacion():
 
         # gestionar incidentes por sector
         for sid in ids_sectores:
-            # limpiar expirados
             inc = _INCIDENTES.get(sid)
             if inc and inc["hasta"] <= instante:
                 _INCIDENTES.pop(sid, None)
-            # chance de iniciar uno si no hay activo
-            if sid not in _INCIDENTES and random.random() < 0.01:
+            if sid not in _INCIDENTES and random.random() < INCIDENT_PROB:
                 _levanta_incidente(sid, instante, intervalo_segundos)
 
         async with contexto_sesion() as sesion:
@@ -492,14 +496,27 @@ async def _bucle_simulacion():
                         estado.medias_moviles_presion[sid],
                         estado.conteo_baja_eficiencia
                     )
+
+                    # deduplicación en DB: no abrir (sector,tipo) si ya hay una 'abierta'
                     for alerta in nuevas:
+                        existe = await sesion.execute(
+                            select(func.count(Alert.id)).where(
+                                Alert.sector_id == alerta.sector_id,
+                                Alert.tipo == alerta.tipo,
+                                Alert.estado == "abierta",
+                            )
+                        )
+                        if existe.scalar_one():
+                            continue  # ya hay una abierta de este tipo en el sector
                         sesion.add(alerta)
                         _difundir({
                             "type": "alert",
                             "payload": {
-                                "id": alerta.id, "sector_id": alerta.sector_id,
-                                "nivel": alerta.nivel, "tipo": alerta.tipo,
-                                "ts": alerta.ts.isoformat(),
+                                "id": alerta.id,
+                                "sector_id": alerta.sector_id,
+                                "nivel": alerta.nivel,
+                                "tipo": alerta.tipo,
+                                "ts": alerta.ts.isoformat() if hasattr(alerta.ts, "isoformat") else instante.isoformat(),
                             }
                         })
 

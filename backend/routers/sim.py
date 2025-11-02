@@ -5,12 +5,16 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from backend.models import Alert
+
 from ..schemas import (
     KPIResponse,
     SectorsResponse,
     AlertsResponse,
     AckRequest,
     AckResponse,
+    AckBulkRequest,
+    AckBulkResponse
 )
 from ..services import sim as servicios_sim
 
@@ -71,33 +75,52 @@ async def marcar_alerta_como_atendida(id_alerta: int, cuerpo: AckRequest):
     return resultado
 
 
-@router.get("/events/stream")
-async def flujo_eventos(request: Request):
-    """
-    Server-Sent Events (SSE) para “tiempo real”.
+# app/routers/sim.py
+@router.post("/alerts/ack_bulk", response_model=AckBulkResponse)
+async def ack_bulk(req: AckBulkRequest):
+    if req.pin != "2131":
+        raise HTTPException(status_code=403, detail="PIN inválido")
+    ahora = datetime.now(timezone.utc)
+    async with contexto_sesion() as sesion, sesion.begin():
+        res = await sesion.execute(
+            select(Alert).where(Alert.id.in_(req.ids), Alert.estado == "abierta")
+        )
+        filas = 0
+        for a in res.scalars().all():
+            a.estado = "atendida"
+            a.atendida_por = "operador@sapal.mx"
+            a.atendida_en = ahora
+            filas += 1
+        return {"updated": filas}
 
-    Envía:
-      - {'type':'hello', 'payload':{'ts':...}} al conectar.
-      - {'type':'tick',  'payload':{'ts':...}} cada intervalo.
-      - {'type':'alert', 'payload':{id, sector_id, nivel, tipo, ts}} por alerta.
-    """
-    async def generador_eventos():
-        saludo_inicial = {
-            "type": "hello",
-            "payload": {"ts": datetime.now(timezone.utc).isoformat()}
-        }
-        yield f"data: {json.dumps(saludo_inicial)}\n\n"
 
-        async for paquete in servicios_sim.suscribirse_eventos():
-            if await request.is_disconnected():
-                break
-            yield f"data: {json.dumps(paquete)}\n\n"
+# @router.get("/events/stream")
+# async def flujo_eventos(request: Request):
+#     """
+#     Server-Sent Events (SSE) para “tiempo real”.
 
-    return StreamingResponse(
-        generador_eventos(),
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
-        media_type="text/event-stream",
-    )
+#     Envía:
+#       - {'type':'hello', 'payload':{'ts':...}} al conectar.
+#       - {'type':'tick',  'payload':{'ts':...}} cada intervalo.
+#       - {'type':'alert', 'payload':{id, sector_id, nivel, tipo, ts}} por alerta.
+#     """
+#     async def generador_eventos():
+#         saludo_inicial = {
+#             "type": "hello",
+#             "payload": {"ts": datetime.now(timezone.utc).isoformat()}
+#         }
+#         yield f"data: {json.dumps(saludo_inicial)}\n\n"
+
+#         async for paquete in servicios_sim.suscribirse_eventos():
+#             if await request.is_disconnected():
+#                 break
+#             yield f"data: {json.dumps(paquete)}\n\n"
+
+#     return StreamingResponse(
+#         generador_eventos(),
+#         headers={
+#             "Cache-Control": "no-cache",
+#             "Connection": "keep-alive",
+#         },
+#         media_type="text/event-stream",
+#     )

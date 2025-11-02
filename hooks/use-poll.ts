@@ -1,6 +1,7 @@
-// hooks/use-poll.ts  ✅ (tu versión ya está bien)
+// hooks/use-poll.ts
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { API } from "@/lib/api";
 
 export function usePoll<T>(path: string, intervalMs = 10_000) {
   const [data, setData] = useState<T | null>(null);
@@ -12,7 +13,8 @@ export function usePoll<T>(path: string, intervalMs = 10_000) {
       const ctrl = new AbortController();
       ctrlRef.current = ctrl;
 
-      const res = await fetch(path, { cache: "no-store", signal: ctrl.signal });
+      const url = path.startsWith("http") ? path : `${API}${path}`;
+      const res = await fetch(url, { cache: "no-store", signal: ctrl.signal });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const json = (await res.json()) as T;
       setData(json);

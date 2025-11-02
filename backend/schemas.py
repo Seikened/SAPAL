@@ -87,3 +87,11 @@ class AckResponse(BaseModel):
     status: Literal["acknowledged"]
     by_user: str
     ts: datetime
+    
+    
+
+class AckBulkRequest(BaseModel):
+    pin: str
+    ids: list[int]
+class AckBulkResponse(BaseModel):
+    updated: int
