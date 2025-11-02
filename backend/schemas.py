@@ -12,11 +12,12 @@ class KPIResponse(BaseModel):
     - uso_datos_pct: % de uso de datos disponible.
     - sectores_en_riesgo: conteo de sectores con al menos una alerta abierta.
     """
-    ts: datetime
+    ts: str
     eficiencia: float
-    tiempo_decision_min: int
-    uso_datos_pct: float
+    eficiencia_trend: List[float]
     sectores_en_riesgo: int
+    alertas_atendidas_24h: int
+    tiempo_decision_min: int
 
 
 class SectorCard(BaseModel):

@@ -5,7 +5,7 @@ import math
 import random
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy import func
@@ -14,6 +14,7 @@ from sqlmodel import select
 
 from ..db import SessionLocal
 from ..models import ActionLog, Alert, Reading, Sector
+
 
 # ─────────────────────────────────────────────────────────────
 # Utilidad de sesión
@@ -233,44 +234,73 @@ def evaluar_reglas_alertas(
 # ─────────────────────────────────────────────────────────────
 # Funciones llamadas por las rutas
 # ─────────────────────────────────────────────────────────────
-async def calcular_kpis() -> dict:
-    # Ventana de 10 minutos recientes
-    ahora = datetime.now(timezone.utc)
-    inicio = ahora - timedelta(minutes=10)
 
+
+async def calcular_kpis() -> dict:
+    """
+    Calcula KPIs:
+      - eficiencia: promedio global del último tick
+      - eficiencia_trend: promedio global por tick (últimos N)
+      - sectores_en_riesgo: sectores con alertas abiertas
+      - alertas_atendidas_24h: conteo en las últimas 24h
+    """
     async with contexto_sesion() as sesion:
+        # Trae lecturas recientes (500 suele bastar para 16 ticks x ~8 sectores)
         res = await sesion.execute(
-            select(Reading).where(Reading.ts >= inicio).order_by(Reading.ts.desc())
+            select(Reading).order_by(Reading.ts.desc()).limit(500)
         )
         lecturas = res.scalars().all()
 
         if not lecturas:
+            ahora = datetime.now(timezone.utc)
             return dict(
-                ts=ahora,
+                ts=ahora.isoformat(),
                 eficiencia=1.0,
-                tiempo_decision_min=12,
-                uso_datos_pct=0.76,
+                eficiencia_trend=[1.0],
                 sectores_en_riesgo=0,
+                alertas_atendidas_24h=0,
+                tiempo_decision_min=12,
             )
 
-        # eficiencia = promedio de (consumo/inyeccion) para reportar 0..1
-        ratios = [r.consumo_m3 / max(r.inyeccion_m3, 0.001) for r in lecturas]
-        eficiencia_prom = sum(ratios) / len(ratios)
+        # Agrupa por ts exacto (cada tick inserta una lectura por sector con el mismo ts)
+        por_ts: dict[datetime, list[float]] = defaultdict(list)
+        for l in lecturas:
+            por_ts[l.ts].append(float(l.eficiencia))
 
-        resp_alertas = await sesion.execute(
-            select(Alert).where(Alert.estado == "abierta", Alert.ts >= inicio)
+        # Orden cronológico (asc) y promedios por tick
+        ts_ordenados = sorted(por_ts.keys())
+        proms = [sum(vals)/len(vals) for t, vals in sorted(por_ts.items())]
+
+        # Últimos N puntos para la sparkline
+        N = 16
+        eficiencia_trend = proms[-N:] if len(proms) > N else proms
+        eficiencia = eficiencia_trend[-1]
+        ts_reciente = ts_ordenados[-1].isoformat()
+
+        # Sectores en riesgo = sectores con alertas abiertas
+        q_abiertas = await sesion.execute(
+            select(Alert).where(Alert.estado == "abierta")
         )
-        alertas_abiertas = resp_alertas.scalars().all()
+        alertas_abiertas = q_abiertas.scalars().all()
         sectores_en_riesgo = len({a.sector_id for a in alertas_abiertas})
 
-        ts_reciente = max(lectura.ts for lectura in lecturas)
+        # Atendidas últimas 24h
+        hace_24 = datetime.now(timezone.utc) - timedelta(hours=24)
+        atendidas_24h = await sesion.execute(
+            select(func.count(Alert.id)).where(
+                Alert.estado == "atendida",
+                Alert.atendida_en >= hace_24
+            )
+        )
+        alertas_atendidas_24h = int(atendidas_24h.scalar_one())
 
         return dict(
             ts=ts_reciente,
-            eficiencia=eficiencia_prom,          # ahora ~0.82–0.98
-            tiempo_decision_min=12,
-            uso_datos_pct=0.76,
+            eficiencia=eficiencia,
+            eficiencia_trend=eficiencia_trend,
             sectores_en_riesgo=sectores_en_riesgo,
+            alertas_atendidas_24h=alertas_atendidas_24h,
+            tiempo_decision_min=12,
         )
 
 async def construir_cuadricula_sectores() -> List[dict]:
@@ -364,6 +394,7 @@ async def listar_alertas(estado: str = "abierta") -> List[dict]:
             elementos.append({
                 "id": alerta.id,
                 "nivel": alerta.nivel,
+                "tipo": alerta.tipo,
                 "titulo": f"{titulo} en Sector {alerta.sector_id}",
                 "resumen": alerta.mensaje,
                 "impacto_m3_mes": 4800.0 if alerta.tipo in ("no_facturable", "baja_eficiencia") else None,

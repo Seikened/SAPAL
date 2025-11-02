@@ -17,18 +17,21 @@ from ..services import sim as servicios_sim
 router = APIRouter()
 
 
+# app/routers/sim.py
 @router.get("/kpis/current", response_model=KPIResponse)
 async def obtener_kpis_actuales():
     """
-    Devuelve los KPIs del encabezado del tablero.
+    KPIs del encabezado del tablero, con tendencia global de eficiencia y
+    conteo de alertas atendidas en las últimas 24h.
     """
     datos = await servicios_sim.calcular_kpis()
     return {
         "ts": datos["ts"],
-        "eficiencia": round(datos["eficiencia"], 3),
-        "tiempo_decision_min": datos["tiempo_decision_min"],
-        "uso_datos_pct": round(datos["uso_datos_pct"], 2),
+        "eficiencia": round(datos["eficiencia"], 4),
+        "eficiencia_trend": [round(x, 4) for x in datos["eficiencia_trend"]],
         "sectores_en_riesgo": datos["sectores_en_riesgo"],
+        "alertas_atendidas_24h": datos["alertas_atendidas_24h"],
+        "tiempo_decision_min": datos["tiempo_decision_min"],
     }
 
 

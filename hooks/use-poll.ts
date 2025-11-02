@@ -1,28 +1,34 @@
-// hooks/use-poll.ts
+// hooks/use-poll.ts  ✅ (tu versión ya está bien)
 "use client";
-import { useEffect, useState } from "react";
-import { apiGet } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-export function usePoll<T>(path: string, ms = 10_000) {
+export function usePoll<T>(path: string, intervalMs = 10_000) {
   const [data, setData] = useState<T | null>(null);
+  const ctrlRef = useRef<AbortController | null>(null);
+
+  const refetch = useCallback(async () => {
+    try {
+      ctrlRef.current?.abort();
+      const ctrl = new AbortController();
+      ctrlRef.current = ctrl;
+
+      const res = await fetch(path, { cache: "no-store", signal: ctrl.signal });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const json = (await res.json()) as T;
+      setData(json);
+    } catch {
+      /* ignore */
+    }
+  }, [path]);
 
   useEffect(() => {
-    let alive = true;
-    const fetcher = async () => {
-      try {
-        const d = await apiGet<T>(path, { cache: "no-store" });
-        if (alive) setData(d);
-      } catch {
-        /* noop */
-      }
-    };
-    fetcher();
-    const id = setInterval(fetcher, ms);
+    refetch();
+    const id = setInterval(refetch, intervalMs);
     return () => {
-      alive = false;
       clearInterval(id);
+      ctrlRef.current?.abort();
     };
-  }, [path, ms]);
+  }, [refetch, intervalMs]);
 
-  return data;
+  return { data, refetch, setData };
 }

@@ -7,29 +7,67 @@ import { AlertTriangle, TrendingUp, Droplets, Clock } from "lucide-react";
 import type { AlertsResponse, AlertItem } from "@/lib/api";
 import { usePoll } from "@/hooks/use-poll";
 import { ackAlert } from "@/lib/api";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const iconFor = (tipo?: string) => {
   if (tipo === "no_facturable") return Droplets;
   if (tipo === "sobrepresion") return AlertTriangle;
-  return TrendingUp;
+  return TrendingUp; // baja_eficiencia o fallback
 };
 
 export function AlertsPanel() {
-  const data = usePoll<AlertsResponse>("/sim/alerts?estado=abierta", 10_000);
-  const items = data?.items ?? [];
+  const { data, refetch, setData } = usePoll<AlertsResponse>("/sim/alerts?estado=abierta", 10_000);
+  const serverItems = data?.items ?? [];
+  const [items, setItems] = useState<AlertItem[]>(serverItems);
   const [working, setWorking] = useState<number | null>(null);
 
-  const getPriority = (nivel: AlertItem["nivel"]) => (nivel === "alta" ? "destructive" : nivel === "media" ? "outline" : "secondary");
-  const getLabel = (nivel: AlertItem["nivel"]) => (nivel === "alta" ? "Alta" : nivel === "media" ? "Media" : "Baja");
+  // sincroniza cuando el servidor trae una nueva foto
+  useEffect(() => {
+    setItems(serverItems);
+  }, [serverItems]);
+
+  const sorted = useMemo(
+    () =>
+      [...items].sort((a, b) => {
+        const p = (x: AlertItem) => (x.nivel === "alta" ? 2 : x.nivel === "media" ? 1 : 0);
+        const d = p(b) - p(a);
+        return d !== 0 ? d : new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      }),
+    [items]
+  );
+
+  const getPriority = (nivel: AlertItem["nivel"]) =>
+    nivel === "alta" ? "destructive" : nivel === "media" ? "outline" : "secondary";
+  const getLabel = (nivel: AlertItem["nivel"]) =>
+    nivel === "alta" ? "Alta" : nivel === "media" ? "Media" : "Baja";
+
+  async function onAck(a: AlertItem) {
+    try {
+      setWorking(a.id);
+      // optimista: quita de UI ya
+      setItems((prev) => prev.filter((x) => x.id !== a.id));
+      // también actualiza el snapshot del hook para que no “reviva” antes del próximo poll
+      setData((prev) => (prev ? { ...prev, items: prev.items.filter((x) => x.id !== a.id) } : prev));
+      // call
+      await ackAlert(a.id, "2131", "Atendida desde UI");
+      // resíncora desde el servidor por si hubo carreras
+      await refetch();
+    } catch {
+      // si falló, vuelve a insertarla
+      setItems((prev) => [...prev, a]);
+      await refetch();
+    } finally {
+      setWorking(null);
+    }
+  }
 
   return (
     <div className="space-y-6">
       <div className="space-y-4">
-        <h2 className="font-heading text-xl font-semibold tracking-tight">Alertas Prioritarias</h2>
+        <h2 className="font-heading text-xl font-semibold tracking-tight">**Alertas Prioritarias**</h2>
         <div className="space-y-3">
-          {items.map((a) => {
-            const Icon = iconFor(a.explicacion && (a as any).tipo);
+          {sorted.map((a) => {
+            const Icon = iconFor(a.tipo);
             return (
               <Card key={a.id} className="p-4 space-y-3">
                 <div className="flex items-start gap-3">
@@ -49,14 +87,14 @@ export function AlertsPanel() {
                       {a.impacto_m3_mes && (
                         <div>
                           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-                            Impacto estimado:
+                            **Impacto estimado**
                           </p>
                           <p className="text-sm leading-relaxed">{a.impacto_m3_mes.toLocaleString("es-MX")} m³/mes</p>
                         </div>
                       )}
                       <div>
                         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-                          Siguiente acción:
+                          **Siguiente acción**
                         </p>
                         <p className="text-sm leading-relaxed">{a.recomendacion}</p>
                       </div>
@@ -68,16 +106,9 @@ export function AlertsPanel() {
                         variant="outline"
                         className="flex-1 bg-transparent font-medium"
                         disabled={working === a.id}
-                        onClick={async () => {
-                          try {
-                            setWorking(a.id);
-                            await ackAlert(a.id, "2131", "Atendida desde UI");
-                          } finally {
-                            setWorking(null);
-                          }
-                        }}
+                        onClick={() => onAck(a)}
                       >
-                        Atendida
+                        {working === a.id ? "Atendiendo..." : "Atendida"}
                       </Button>
                       <Button size="sm" variant="default" className="flex-1 font-medium">
                         Escalar
@@ -88,12 +119,14 @@ export function AlertsPanel() {
               </Card>
             );
           })}
-          {items.length === 0 && <Card className="p-4 text-sm text-muted-foreground">Sin alertas abiertas ahora mismo.</Card>}
+          {sorted.length === 0 && (
+            <Card className="p-4 text-sm text-muted-foreground">Sin alertas abiertas ahora mismo.</Card>
+          )}
         </div>
       </div>
 
       <div className="space-y-4">
-        <h2 className="font-heading text-xl font-semibold tracking-tight">Predicción a Corto Plazo</h2>
+        <h2 className="font-heading text-xl font-semibold tracking-tight">**Predicción a Corto Plazo**</h2>
         <Card className="p-4 space-y-3 bg-accent/50">
           <div className="flex items-start gap-3">
             <div className="p-2 rounded-lg bg-primary/10">
@@ -101,7 +134,7 @@ export function AlertsPanel() {
             </div>
             <div className="flex-1 space-y-2">
               <h3 className="font-heading text-base font-semibold leading-tight tracking-tight">
-                Predicción demo: variabilidad por calor
+                **Predicción demo: variabilidad por calor**
               </h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 La demanda subirá en horas cálidas; monitorea sectores con pérdidas históricas altas.

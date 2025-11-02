@@ -1,3 +1,4 @@
+// components/sector-grid.tsx
 "use client";
 import { useState, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -10,36 +11,32 @@ import { AnimatedCard } from "@/components/ui/animated-card";
 type VisualLevel = "normal" | "warning" | "critical";
 
 export function SectorGrid() {
-  const data = usePoll<SectorsResponse>("/sim/sectors", 10_000);
+  const { data } = usePoll<SectorsResponse>("/sim/sectors", 10_000);
   const sectors = data?.items ?? [];
   const [selected, setSelected] = useState<SectorItem | null>(null);
 
   const mapped = useMemo(() => {
     return sectors.map((s) => {
+      const serie = Array.isArray(s.tendencia) ? s.tendencia : [];
       const trend =
-        s.tendencia.length >= 2
-          ? s.tendencia.at(-1)! > s.tendencia[0]
-            ? "up"
-            : s.tendencia.at(-1)! < s.tendencia[0]
-            ? "down"
-            : "stable"
+        serie.length >= 2
+          ? serie.at(-1)! > serie[0] ? "up" :
+            serie.at(-1)! < serie[0] ? "down" : "stable"
           : "stable";
       const level: VisualLevel =
-        s.estado === "critico" ? "critical" : s.estado === "alerta" ? "warning" : "normal";
+        s.estado === "critico" ? "critical" :
+        s.estado === "alerta" ? "warning" : "normal";
       return { ...s, trend, level };
     });
   }, [sectors]);
 
   const statusChip = (level: VisualLevel) =>
-    level === "normal" ? (
-      <Badge variant="outline" className="bg-success/10 border-success text-success text-xs font-medium">Normal</Badge>
-    ) : level === "warning" ? (
-      <Badge variant="outline" className="bg-warning/10 border-warning text-warning text-xs font-medium">Alerta</Badge>
-    ) : (
-      <Badge variant="outline" className="bg-destructive/10 border-destructive text-destructive text-xs font-medium">Crítico</Badge>
-    );
+    level === "normal"
+      ? <Badge variant="outline" className="bg-success/10 border-success text-success text-xs font-medium">Normal</Badge>
+      : level === "warning"
+      ? <Badge variant="outline" className="bg-warning/10 border-warning text-warning text-xs font-medium">Alerta</Badge>
+      : <Badge variant="outline" className="bg-destructive/10 border-destructive text-destructive text-xs font-medium">Crítico</Badge>;
 
-  // border más visible y background relleno según severidad
   const cardChromeClasses = (level: VisualLevel) =>
     level === "normal"
       ? "border-success/40 hover:border-success bg-success/5"
@@ -48,19 +45,15 @@ export function SectorGrid() {
       : "border-destructive/80 hover:border-destructive bg-destructive/10";
 
   const getTrendIcon = (trend: "up" | "down" | "stable") =>
-    trend === "up" ? (
-      <TrendingUp className="h-4 w-4 opacity-80" />
-    ) : trend === "down" ? (
-      <TrendingDown className="h-4 w-4 opacity-80" />
-    ) : (
-      <Minus className="h-4 w-4 opacity-60" />
-    );
+    trend === "up" ? <TrendingUp className="h-4 w-4 opacity-80" /> :
+    trend === "down" ? <TrendingDown className="h-4 w-4 opacity-80" /> :
+    <Minus className="h-4 w-4 opacity-60" />;
 
   return (
     <>
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="font-heading text-xl font-semibold tracking-tight">Mapa de Sectores</h2>
+          <h2 className="font-heading text-xl font-semibold tracking-tight">**Mapa de Sectores**</h2>
           <div className="flex gap-2">
             <Badge variant="outline" className="bg-success/10 border-success text-success text-xs font-medium">Normal</Badge>
             <Badge variant="outline" className="bg-warning/10 border-warning text-warning text-xs font-medium">Alerta</Badge>
