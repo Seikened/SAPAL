@@ -1,69 +1,49 @@
 // components/sector-grid.tsx
 "use client";
-import { useEffect, useState } from "react";
+import { useState, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SectorDetail } from "@/components/sector-detail";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
-import { apiGet, SectorsResponse } from "@/lib/api";
+import type { SectorsResponse, SectorItem } from "@/lib/api";
+import { usePoll } from "@/hooks/use-poll";
 
 type SectorStatus = "normal" | "warning" | "critical";
-type Trend = "up" | "down" | "stable";
-
-function estadoToStatus(e: "normal" | "alerta" | "critico"): SectorStatus {
-  if (e === "alerta") return "warning";
-  if (e === "critico") return "critical";
-  return "normal";
-}
-function tendenciaToTrend(vals: number[]): Trend {
-  if (vals.length < 2) return "stable";
-  const first = vals[0], last = vals[vals.length - 1];
-  if (last > first * 1.02) return "up";
-  if (last < first * 0.98) return "down";
-  return "stable";
-}
-
-interface UISector {
-  id: string;
-  name: string;
-  status: SectorStatus;
-  efficiency: number;
-  pressure: number;
-  alerts: string[];
-  trend: Trend;
-}
 
 export function SectorGrid() {
-  const [selectedSector, setSelectedSector] = useState<UISector | null>(null);
-  const [sectors, setSectors] = useState<UISector[]>([]);
+  const data = usePoll<SectorsResponse>("/sim/sectors", 10_000);
+  const sectors = data?.items ?? [];
+  const [selected, setSelected] = useState<SectorItem | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    apiGet<SectorsResponse>("/sim/sectors").then(({ items }) => {
-      if (!alive) return;
-      const mapped = items.map((s) => ({
-        id: String(s.id),
-        name: s.nombre,
-        status: estadoToStatus(s.estado),
-        efficiency: Math.round(s.eficiencia * 100),
-        pressure: Number(s.presion_psi.toFixed(0)),
-        alerts: s.alertas_abiertas ? [`${s.alertas_abiertas} alerta(s)`] : [],
-        trend: tendenciaToTrend(s.tendencia ?? []),
-      }));
-      setSectors(mapped);
-    }).catch(console.error);
-    return () => { alive = false; };
-  }, []);
+  const mapped = useMemo(() => {
+    return sectors.map((s) => {
+      let status: SectorStatus = "normal";
+      if (s.estado === "alerta") status = "warning";
+      if (s.estado === "critico") status = "critical";
+      const trend =
+        s.tendencia.length >= 2
+          ? s.tendencia[s.tendencia.length - 1] > s.tendencia[0]
+            ? "up"
+            : s.tendencia[s.tendencia.length - 1] < s.tendencia[0]
+            ? "down"
+            : "stable"
+          : "stable";
+      return { ...s, status, trend };
+    });
+  }, [sectors]);
 
-  const color = (status: SectorStatus) =>
+  const getStatusColor = (status: SectorStatus) =>
     status === "normal"
       ? "bg-success/10 border-success text-success"
       : status === "warning"
       ? "bg-warning/10 border-warning text-warning"
       : "bg-destructive/10 border-destructive text-destructive";
 
-  const icon = (t: Trend) =>
-    t === "up" ? <TrendingUp className="h-4 w-4" /> : t === "down" ? <TrendingDown className="h-4 w-4" /> : <Minus className="h-4 w-4" />;
+  const getStatusLabel = (status: SectorStatus) =>
+    status === "normal" ? "Normal" : status === "warning" ? "Alerta" : "Crítico";
+
+  const getTrendIcon = (trend: "up" | "down" | "stable") =>
+    trend === "up" ? <TrendingUp className="h-4 w-4" /> : trend === "down" ? <TrendingDown className="h-4 w-4" /> : <Minus className="h-4 w-4" />;
 
   return (
     <>
@@ -78,37 +58,35 @@ export function SectorGrid() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          {sectors.map((sector) => (
+          {mapped.map((sector) => (
             <Card
               key={sector.id}
-              className={`p-4 cursor-pointer transition-all hover:shadow-md border-2 ${color(sector.status)}`}
-              onClick={() => setSelectedSector(sector)}
+              className={`p-4 cursor-pointer transition-all hover:shadow-md border-2 ${getStatusColor(sector.status)}`}
+              onClick={() => setSelected(sector)}
             >
               <div className="space-y-2">
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="font-heading font-semibold text-sm tracking-tight">{sector.name}</p>
-                    <p className="text-xs opacity-80 font-medium">
-                      {sector.status === "normal" ? "Normal" : sector.status === "warning" ? "Alerta" : "Crítico"}
-                    </p>
+                    <p className="font-heading font-semibold text-sm tracking-tight">{sector.nombre}</p>
+                    <p className="text-xs opacity-80 font-medium">{getStatusLabel(sector.status)}</p>
                   </div>
-                  {icon(sector.trend)}
+                  {getTrendIcon(sector.trend)}
                 </div>
 
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs">
                     <span className="opacity-80">Eficiencia</span>
-                    <span className="font-medium tabular-nums">{sector.efficiency}%</span>
+                    <span className="font-medium tabular-nums">{Math.round(sector.eficiencia * 100)}%</span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="opacity-80">Presión</span>
-                    <span className="font-medium tabular-nums">{sector.pressure} PSI</span>
+                    <span className="font-medium tabular-nums">{sector.presion_psi} PSI</span>
                   </div>
                 </div>
 
-                {sector.alerts.length > 0 && (
+                {sector.alertas_abiertas > 0 && (
                   <div className="pt-2 border-t border-current/20">
-                    <p className="text-xs font-medium tabular-nums">{sector.alerts.join(", ")}</p>
+                    <p className="text-xs font-medium tabular-nums">{sector.alertas_abiertas} alerta(s)</p>
                   </div>
                 )}
               </div>
@@ -117,7 +95,20 @@ export function SectorGrid() {
         </div>
       </div>
 
-      {selectedSector && <SectorDetail sector={selectedSector} onClose={() => setSelectedSector(null)} />}
+      {selected && (
+        <SectorDetail
+          sector={{
+            id: String(selected.id),
+            name: selected.nombre,
+            status: selected.estado === "critico" ? "critical" : selected.estado === "alerta" ? "warning" : "normal",
+            efficiency: Math.round(selected.eficiencia * 100),
+            pressure: selected.presion_psi,
+            alerts: selected.alertas_abiertas > 0 ? ["Alertas activas en este sector"] : [],
+            trend: "stable",
+          }}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </>
   );
 }

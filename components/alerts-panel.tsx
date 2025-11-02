@@ -1,77 +1,82 @@
 // components/alerts-panel.tsx
 "use client";
-import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, TrendingUp, Droplets, Clock } from "lucide-react";
-import { apiGet, AlertsResponse, AlertItem, ackAlert } from "@/lib/api";
+import type { AlertsResponse, AlertItem } from "@/lib/api";
+import { usePoll } from "@/hooks/use-poll";
+import { ackAlert } from "@/lib/api";
+import { useState } from "react";
+
+const iconFor = (tipo?: string) => {
+  if (tipo === "no_facturable") return Droplets;
+  if (tipo === "sobrepresion") return AlertTriangle;
+  return TrendingUp;
+};
 
 export function AlertsPanel() {
-  const [alerts, setAlerts] = useState<AlertItem[]>([]);
-  useEffect(() => {
-    let alive = true;
-    apiGet<AlertsResponse>("/sim/alerts?estado=abierta").then(({ items }) => {
-      if (alive) setAlerts(items);
-    }).catch(console.error);
-    return () => { alive = false; };
-  }, []);
+  const data = usePoll<AlertsResponse>("/sim/alerts?estado=abierta", 10_000);
+  const items = data?.items ?? [];
+  const [working, setWorking] = useState<number | null>(null);
 
-  const iconFor = (tipo?: string) =>
-    tipo === "no_facturable" ? Droplets : tipo === "baja_eficiencia" ? AlertTriangle : TrendingUp;
-
-  const onAck = async (id: number) => {
-    await ackAlert(id, "2131", "Atendida desde UI");
-    setAlerts((prev) => prev.filter(a => a.id !== id));
-  };
+  const getPriority = (nivel: AlertItem["nivel"]) => (nivel === "alta" ? "destructive" : nivel === "media" ? "outline" : "secondary");
+  const getLabel = (nivel: AlertItem["nivel"]) => (nivel === "alta" ? "Alta" : nivel === "media" ? "Media" : "Baja");
 
   return (
     <div className="space-y-6">
       <div className="space-y-4">
         <h2 className="font-heading text-xl font-semibold tracking-tight">Alertas Prioritarias</h2>
         <div className="space-y-3">
-          {alerts.map((alert) => {
-            const Icon = iconFor(alert?.explicacion && (alert.explicacion as any).caracteristica);
-            const prioridad = alert.nivel === "alta" ? "destructive" : alert.nivel === "media" ? "outline" : "secondary";
-            const label = alert.nivel === "alta" ? "Alta" : alert.nivel === "media" ? "Media" : "Baja";
+          {items.map((a) => {
+            const Icon = iconFor(a.explicacion && (a as any).tipo);
             return (
-              <Card key={alert.id} className="p-4 space-y-3">
+              <Card key={a.id} className="p-4 space-y-3">
                 <div className="flex items-start gap-3">
                   <div className="p-2 rounded-lg bg-primary/10">
                     <Icon className="h-5 w-5 text-primary" />
                   </div>
                   <div className="flex-1 space-y-2">
                     <div className="flex items-start justify-between gap-2">
-                      <h3 className="font-heading text-base font-semibold leading-tight tracking-tight">
-                        {alert.titulo}
-                      </h3>
-                      <Badge variant={prioridad as any} className="shrink-0 text-xs font-medium">
-                        {label}
+                      <h3 className="font-heading text-base font-semibold leading-tight tracking-tight">{a.titulo}</h3>
+                      <Badge variant={getPriority(a.nivel)} className="shrink-0 text-xs font-medium">
+                        {getLabel(a.nivel)}
                       </Badge>
                     </div>
-                    <p className="text-sm text-muted-foreground leading-relaxed">{alert.resumen}</p>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{a.resumen}</p>
 
                     <div className="pt-2 border-t space-y-2">
-                      {alert.impacto_m3_mes != null && (
+                      {a.impacto_m3_mes && (
                         <div>
                           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
                             Impacto estimado:
                           </p>
-                          <p className="text-sm leading-relaxed">
-                            {alert.impacto_m3_mes.toLocaleString("es-MX")} m³/mes
-                          </p>
+                          <p className="text-sm leading-relaxed">{a.impacto_m3_mes.toLocaleString("es-MX")} m³/mes</p>
                         </div>
                       )}
                       <div>
                         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
                           Siguiente acción:
                         </p>
-                        <p className="text-sm leading-relaxed">{alert.recomendacion}</p>
+                        <p className="text-sm leading-relaxed">{a.recomendacion}</p>
                       </div>
                     </div>
 
                     <div className="flex gap-2 pt-2">
-                      <Button size="sm" variant="outline" className="flex-1 bg-transparent font-medium" onClick={() => onAck(alert.id)}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 bg-transparent font-medium"
+                        disabled={working === a.id}
+                        onClick={async () => {
+                          try {
+                            setWorking(a.id);
+                            await ackAlert(a.id, "2131", "Atendida desde UI");
+                          } finally {
+                            setWorking(null);
+                          }
+                        }}
+                      >
                         Atendida
                       </Button>
                       <Button size="sm" variant="default" className="flex-1 font-medium">
@@ -83,22 +88,32 @@ export function AlertsPanel() {
               </Card>
             );
           })}
-          {alerts.length === 0 && (
-            <Card className="p-4 space-y-2 bg-accent/30">
-              <div className="flex items-start gap-3">
-                <div className="p-2 rounded-lg bg-primary/10">
-                  <Clock className="h-5 w-5 text-primary" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="font-heading text-base font-semibold leading-tight tracking-tight">
-                    Sin alertas abiertas
-                  </h3>
-                  <p className="text-sm text-muted-foreground">Buen momento para mantenimiento preventivo.</p>
-                </div>
-              </div>
-            </Card>
-          )}
+          {items.length === 0 && <Card className="p-4 text-sm text-muted-foreground">Sin alertas abiertas ahora mismo.</Card>}
         </div>
+      </div>
+
+      <div className="space-y-4">
+        <h2 className="font-heading text-xl font-semibold tracking-tight">Predicción a Corto Plazo</h2>
+        <Card className="p-4 space-y-3 bg-accent/50">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-lg bg-primary/10">
+              <Clock className="h-5 w-5 text-primary" />
+            </div>
+            <div className="flex-1 space-y-2">
+              <h3 className="font-heading text-base font-semibold leading-tight tracking-tight">
+                Predicción demo: variabilidad por calor
+              </h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                La demanda subirá en horas cálidas; monitorea sectores con pérdidas históricas altas.
+              </p>
+              <div className="flex items-center gap-2 pt-1">
+                <Badge variant="outline" className="text-xs font-medium">
+                  Próximas 48h
+                </Badge>
+              </div>
+            </div>
+          </div>
+        </Card>
       </div>
     </div>
   );

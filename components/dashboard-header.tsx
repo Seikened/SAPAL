@@ -1,12 +1,15 @@
 // components/dashboard-header.tsx
+"use client";
 import { Card } from "@/components/ui/card";
 import { Activity, Clock, Database, AlertTriangle } from "lucide-react";
-import { apiGet, KPIResponse } from "@/lib/api";
+import type { KPIResponse } from "@/lib/api";
+import { usePoll } from "@/hooks/use-poll";
 
-export async function DashboardHeader() {
-  const kpis = await apiGet<KPIResponse>("/sim/kpis/current");
+export function DashboardHeader() {
+  const kpis = usePoll<KPIResponse>("/sim/kpis/current", 10_000);
+  if (!kpis) return null;
+
   const fmtPct = (x: number) => `${(x * 100).toFixed(1)}%`;
-
   const statusEfic = kpis.eficiencia >= 0.85 ? "success" : kpis.eficiencia >= 0.75 ? "warning" : "destructive";
   const statusUso = kpis.uso_datos_pct >= 0.7 ? "success" : "warning";
   const statusRiesgo = kpis.sectores_en_riesgo > 5 ? "destructive" : kpis.sectores_en_riesgo > 0 ? "warning" : "success";
@@ -39,7 +42,7 @@ export async function DashboardHeader() {
                 <p className={`text-3xl font-bold tabular-nums leading-none ${color(statusEfic)}`}>
                   {fmtPct(kpis.eficiencia)}
                 </p>
-                <p className="text-xs text-muted-foreground mt-2">Inyección / Consumo</p>
+                <p className="text-xs text-muted-foreground mt-2">Consumo / Inyección</p>
               </div>
               <Activity className={`h-8 w-8 ${color(statusEfic)}`} />
             </div>
@@ -49,12 +52,12 @@ export async function DashboardHeader() {
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Tiempo de Decisión</p>
-                <p className={`text-3xl font-bold tabular-nums leading-none text-success`}>
+                <p className="text-3xl font-bold tabular-nums leading-none text-success">
                   {kpis.tiempo_decision_min} min
                 </p>
                 <p className="text-xs text-muted-foreground mt-2">Promedio últimas 24h</p>
               </div>
-              <Clock className={`h-8 w-8 text-success`} />
+              <Clock className="h-8 w-8 text-success" />
             </div>
           </Card>
 
