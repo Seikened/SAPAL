@@ -1,4 +1,3 @@
-// components/sector-grid.tsx
 "use client";
 import { useState, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -25,9 +24,8 @@ export function SectorGrid() {
             ? "down"
             : "stable"
           : "stable";
-
-      // “estado” ya viene calculado por backend: "normal" | "alerta" | "critico"
-      const level: VisualLevel = s.estado === "critico" ? "critical" : s.estado === "alerta" ? "warning" : "normal";
+      const level: VisualLevel =
+        s.estado === "critico" ? "critical" : s.estado === "alerta" ? "warning" : "normal";
       return { ...s, trend, level };
     });
   }, [sectors]);
@@ -41,15 +39,22 @@ export function SectorGrid() {
       <Badge variant="outline" className="bg-destructive/10 border-destructive text-destructive text-xs font-medium">Crítico</Badge>
     );
 
-  const cardBorderClasses = (level: VisualLevel) =>
+  // border más visible y background relleno según severidad
+  const cardChromeClasses = (level: VisualLevel) =>
     level === "normal"
-      ? "border-success/40 hover:border-success"
+      ? "border-success/40 hover:border-success bg-success/5"
       : level === "warning"
-      ? "border-warning/60 hover:border-warning"
-      : "border-destructive/70 hover:border-destructive";
+      ? "border-warning/70 hover:border-warning bg-warning/10"
+      : "border-destructive/80 hover:border-destructive bg-destructive/10";
 
   const getTrendIcon = (trend: "up" | "down" | "stable") =>
-    trend === "up" ? <TrendingUp className="h-4 w-4 opacity-80" /> : trend === "down" ? <TrendingDown className="h-4 w-4 opacity-80" /> : <Minus className="h-4 w-4 opacity-60" />;
+    trend === "up" ? (
+      <TrendingUp className="h-4 w-4 opacity-80" />
+    ) : trend === "down" ? (
+      <TrendingDown className="h-4 w-4 opacity-80" />
+    ) : (
+      <Minus className="h-4 w-4 opacity-60" />
+    );
 
   return (
     <>
@@ -69,7 +74,7 @@ export function SectorGrid() {
               key={sector.id}
               level={sector.level}
               aria-label={`Sector ${sector.nombre} estado ${sector.level}`}
-              className={`border-2 rounded-2xl ${cardBorderClasses(sector.level)}`}
+              className={`border-2 rounded-2xl ${cardChromeClasses(sector.level)}`}
               onClick={() => setSelected(sector)}
             >
               <div className="p-4 space-y-2">
