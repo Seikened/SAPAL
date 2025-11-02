@@ -1,14 +1,19 @@
-from sqlmodel import SQLModel, create_engine, Session
+from sqlmodel import SQLModel
 from sqlalchemy import event
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker , AsyncSession
 
-ENGINE = create_engine("sqlite:///./app.db", echo=False)
+ASYNC_ENGINE = create_async_engine("sqlite+aiosqlite:///./app.db", echo=False, future=True)
 
-def init_db():
-    SQLModel.metadata.create_all(ENGINE)
+SessionLocal = async_sessionmaker(bind=ASYNC_ENGINE, class_=AsyncSession, expire_on_commit=False)
+
+async def init_db():
+    async with ASYNC_ENGINE.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
 
 
 
-@event.listens_for(ENGINE, "connect")
+
+@event.listens_for(ASYNC_ENGINE.sync_engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
@@ -16,6 +21,6 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor.close()
 
 
-def get_session():
-    with Session(ENGINE) as session:
+async def get_session():
+    async with SessionLocal() as session:
         yield session

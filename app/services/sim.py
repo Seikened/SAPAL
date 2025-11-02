@@ -1,34 +1,35 @@
 # app/services/sim.py
 import asyncio
+import json
 import math
 import random
-import json
-from contextlib import contextmanager
-from datetime import datetime, timezone
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy import func
-from sqlmodel import select, Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
-from ..db import ENGINE
-from ..models import Sector, Reading, Alert, ActionLog
+from ..db import SessionLocal
+from ..models import ActionLog, Alert, Reading, Sector
 
 
 # ─────────────────────────────────────────────────────────────
 # Utilidad para evitar repetir "with Session(ENGINE) as s:"
 # ─────────────────────────────────────────────────────────────
-@contextmanager
-def contexto_sesion():
+@asynccontextmanager
+async def contexto_sesion():
     """
     Abre una sesión de base de datos y la cierra automáticamente.
     Evita repetir boilerplate en cada función.
     """
-    sesion = Session(ENGINE)
+    sesion: AsyncSession = SessionLocal()
     try:
         yield sesion
     finally:
-        sesion.close()
+        await sesion.close()
 
 
 # ─────────────────────────────────────────────────────────────
@@ -101,22 +102,21 @@ def factor_estacional_por_hora(instante: datetime) -> float:
     return max(0.7, base)
 
 
-def asegurar_sectores_semilla() -> List[int]:
+async def asegurar_sectores_semilla() -> List[int]:
     """
     Garantiza que existan sectores iniciales.
     Devuelve los ids de sectores activos.
     """
-    with contexto_sesion() as sesion:
-        existentes = sesion.exec(select(Sector)).all()
+    async with contexto_sesion() as sesion:
+        res = await sesion.execute(select(Sector))
+        existentes = res.scalars().all()
         if not existentes:
-            sectores = [
-                (233, "Sector 233"), (234, "Sector 234"), (145, "Sector 145"),
-                (89, "Sector 089"),  (156, "Sector 156"), (201, "Sector 201"),
-                (312, "Sector 312"), (78, "Sector 078"),
-            ]
-            for sid, nombre in sectores:
-                sesion.add(Sector(id=sid, nombre=nombre, zona=None, activo=True))
-            sesion.commit()
+            sectores = [(233,"Sector 233"), (234,"Sector 234"), (145,"Sector 145"),
+                        (89,"Sector 089"), (156,"Sector 156"), (201,"Sector 201"),
+                        (312,"Sector 312"), (78,"Sector 078")]
+            async with sesion.begin():  # ✅ una sola transacción
+                for sid, nombre in sectores:
+                    sesion.add(Sector(id=sid, nombre=nombre, zona=None, activo=True))
             return [sid for sid, _ in sectores]
         return [sec.id for sec in existentes if sec.activo]
 
@@ -229,14 +229,15 @@ def evaluar_reglas_alertas(
 # ─────────────────────────────────────────────────────────────
 # Funciones usadas por las rutas (KPIs, sectores, alertas, ACK)
 # ─────────────────────────────────────────────────────────────
-def calcular_kpis() -> dict:
+async def calcular_kpis() -> dict:
     """
     Calcula KPIs del encabezado del tablero.
     """
-    with contexto_sesion() as sesion:
-        lecturas = sesion.exec(
+    async with contexto_sesion() as sesion:
+        res = await sesion.execute(
             select(Reading).order_by(Reading.ts.desc()).limit(500)
-        ).all()
+        )
+        lecturas = res.scalars().all()
 
         if not lecturas:
             ahora = datetime.now(timezone.utc)
@@ -248,38 +249,43 @@ def calcular_kpis() -> dict:
                 sectores_en_riesgo=0,
             )
 
-        eficiencia_promedio = sum(l.eficiencia for l in lecturas) / len(lecturas)
-        alertas_abiertas = sesion.exec(
+        eficiencia_promedio = sum(lectura.eficiencia for lectura in lecturas) / len(lecturas)
+        
+        respuesta_alertas = await sesion.execute(
             select(Alert).where(Alert.estado == "abierta")
-        ).all()
+        )
+        alertas_abiertas = respuesta_alertas.scalars().all()
+        
         sectores_en_riesgo = len({a.sector_id for a in alertas_abiertas})
-        ts_reciente = max(l.ts for l in lecturas)
+        ts_reciente = max(lectura.ts for lectura in lecturas)
 
-        return dict(
+        retorno = dict(
             ts=ts_reciente,
             eficiencia=eficiencia_promedio,
             tiempo_decision_min=12,
             uso_datos_pct=0.76,
             sectores_en_riesgo=sectores_en_riesgo,
         )
+        return retorno
 
-
-def construir_cuadricula_sectores() -> List[dict]:
+async def construir_cuadricula_sectores() -> List[dict]:
     """
     Construye las tarjetas de sectores para el grid del dashboard.
     Incluye estado semaforizado y pequeña serie de tendencia.
     """
-    with contexto_sesion() as sesion:
-        sectores = sesion.exec(select(Sector).where(Sector.activo == True)).all()
-        salida: List[dict] = []
+    async with contexto_sesion() as sesion:
+        respuesta_sectores = await sesion.execute(select(Sector).where(Sector.activo.is_(True)))
+        sectores = respuesta_sectores.scalars().all()
+        salida: List[dict] = [] 
 
         for sector in sectores:
-            lecturas = sesion.exec(
+            respuesta_lecturas = await sesion.execute(
                 select(Reading)
                 .where(Reading.sector_id == sector.id)
                 .order_by(Reading.ts.desc())
                 .limit(4)
-            ).all()
+            )
+            lecturas = respuesta_lecturas.scalars().all()
             if not lecturas:
                 continue
 
@@ -293,14 +299,15 @@ def construir_cuadricula_sectores() -> List[dict]:
             if eficiencia_actual < 0.7:
                 estado = "critico"
 
-            cantidad_alertas_abiertas = sesion.exec(
+            res_cantidad_alertas_abiertas = await sesion.execute(
                 select(func.count(Alert.id)).where(
                     Alert.sector_id == sector.id,
                     Alert.estado == "abierta",
                 )
-            ).one()
+            )
+            cantidad_alertas_abiertas = res_cantidad_alertas_abiertas.scalar_one()
 
-            tendencia = [float(l.eficiencia) for l in reversed(lecturas)]
+            tendencia = [float(lectura.eficiencia) for lectura in reversed(lecturas)]
 
             salida.append({
                 "id": sector.id,
@@ -315,32 +322,53 @@ def construir_cuadricula_sectores() -> List[dict]:
         return salida
 
 
-def listar_alertas(estado: str = "abierta") -> List[dict]:
+
+
+
+async def listar_alertas(estado: str = "abierta") -> List[dict]:
     """
     Lista las alertas filtradas por estado, con títulos legibles y recomendación.
+    - Normaliza `estado` a minúsculas y valida contra el conjunto permitido.
+    - Mapea títulos por tipo con un diccionario.
+    - Intenta parsear `explicacion` a dict; si falla, conserva el valor crudo en {"raw": ...}.
     """
-    with contexto_sesion() as sesion:
-        query = sesion.exec(
+    estado = (estado or "").lower()
+    estados_validos = {"abierta", "atendida", "escalada"}
+    if estado not in estados_validos:
+        # Si te late, puedes devolver [] silenciosamente; aquí lo forzamos a "abierta".
+        estado = "abierta"
+
+    titulo_por_tipo = {
+        "no_facturable": "Posible fuga",
+        "baja_eficiencia": "Baja eficiencia",
+        "sobrepresion": "Anomalía de presión",
+    }
+
+    async with contexto_sesion() as sesion:
+        res = await sesion.execute(
             select(Alert)
             .where(Alert.estado == estado)
             .order_by(Alert.ts.desc())
             .limit(50)
-        ).all()
+        )
+        alertas = res.scalars().all()
 
-        elementos: List[dict] = []
-        for alerta in query:
-            if alerta.tipo == "no_facturable":
-                titulo = "Posible fuga"
-            elif alerta.tipo == "baja_eficiencia":
-                titulo = "Baja eficiencia"
-            else:
-                titulo = "Anomalía de presión"
+        elementos: list[dict] = []
+        for alerta in alertas:
+            titulo = titulo_por_tipo.get(alerta.tipo, "Alerta")
 
             recomendacion = (
                 "Inspección en válvula 17. Prioridad alta. Hoy."
                 if alerta.nivel == "alta"
                 else "Monitoreo y verificación en sitio."
             )
+
+            explicacion_dict = None
+            if alerta.explicacion:
+                try:
+                    explicacion_dict = json.loads(alerta.explicacion)
+                except Exception:
+                    explicacion_dict = {"raw": alerta.explicacion}
 
             elementos.append({
                 "id": alerta.id,
@@ -352,36 +380,33 @@ def listar_alertas(estado: str = "abierta") -> List[dict]:
                 "sector_id": alerta.sector_id,
                 "created_at": alerta.ts,
                 "estado": alerta.estado,
-                "explicacion": {"raw": alerta.explicacion} if alerta.explicacion else None,
+                "explicacion": explicacion_dict,
             })
 
         return elementos
 
 
-def atender_alerta(id_alerta: int, correo_usuario: str, nota: Optional[str]):
-    """
-    Marca una alerta como 'atendida' (ACK) y registra la acción en bitácora.
-    """
-    ahora = datetime.utcnow()
-    with contexto_sesion() as sesion:
-        alerta = sesion.get(Alert, id_alerta)
-        if not alerta or alerta.estado != "abierta":
-            return None
+async def atender_alerta(id_alerta: int, correo_usuario: str, nota: Optional[str]):
+    ahora = datetime.now(timezone.utc)
+    async with contexto_sesion() as sesion:
+        async with sesion.begin():  # ✅ transacción atómica
+            res = await sesion.execute(select(Alert).where(Alert.id == id_alerta))
+            alerta = res.scalar_one_or_none()
+            if not alerta or alerta.estado != "abierta":
+                return None
 
-        alerta.estado = "atendida"
-        alerta.atendida_por = correo_usuario
-        alerta.atendida_en = ahora
+            alerta.estado = "atendida"
+            alerta.atendida_por = correo_usuario
+            alerta.atendida_en = ahora
 
-        sesion.add(ActionLog(
-            alert_id=id_alerta,
-            actor=correo_usuario,
-            accion="ack",
-            nota=nota,
-        ))
-        sesion.add(alerta)
-        sesion.commit()
+            sesion.add(ActionLog(
+                alert_id=id_alerta,
+                actor=correo_usuario,
+                accion="ack",
+                nota=nota,
+            ))
 
-        return dict(status="acknowledged", by_user=correo_usuario, ts=ahora)
+        return {"status": "acknowledged", "by_user": correo_usuario, "ts": ahora}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -420,7 +445,7 @@ async def _bucle_simulacion():
     - Inicializa estado de simulación y procesos AR(1).
     - Inserta lecturas periódicas, evalúa reglas y emite eventos SSE.
     """
-    ids_sectores = asegurar_sectores_semilla()
+    ids_sectores = await asegurar_sectores_semilla()
     estado = EstadoSimulacion(ids_sectores)
 
     procesos_inyeccion = {sid: ProcesoAR1(0.7, 5.0, 120.0) for sid in ids_sectores}
@@ -428,49 +453,44 @@ async def _bucle_simulacion():
     procesos_presion   = {sid: ProcesoAR1(0.6, 1.5, 40.0)  for sid in ids_sectores}
 
     # Bootstrap para que el dashboard no arranque vacío.
-    ahora = datetime.utcnow()
-    with contexto_sesion() as sesion:
-        for sid in ids_sectores:
-            datos_lectura = simular_lectura(
-                sid, ahora, procesos_inyeccion[sid], procesos_consumo[sid], procesos_presion[sid]
-            )
-            sesion.add(Reading(**datos_lectura))
-        sesion.commit()
+    # Bootstrap
+    ahora = datetime.now(timezone.utc)
+    async with contexto_sesion() as sesion:
+        async with sesion.begin():  # ✅ transacción única para los inserts iniciales
+            for sid in ids_sectores:
+                datos = simular_lectura(sid, ahora, procesos_inyeccion[sid], procesos_consumo[sid], procesos_presion[sid])
+                sesion.add(Reading(**datos))
+        await sesion.commit()
 
     intervalo_segundos = 10  # demo rápida
 
     while True:
-        instante = datetime.utcnow()
-        with contexto_sesion() as sesion:
-            for sid in ids_sectores:
-                datos_lectura = simular_lectura(
-                    sid, instante, procesos_inyeccion[sid], procesos_consumo[sid], procesos_presion[sid]
-                )
-                lectura = Reading(**datos_lectura)
-                sesion.add(lectura)
-                sesion.commit()
+        instante = datetime.now(timezone.utc)
+        async with contexto_sesion() as sesion:
+            async with sesion.begin():  # ✅ un commit por tick
+                for sid in ids_sectores:
+                    datos = simular_lectura(sid, instante, procesos_inyeccion[sid], procesos_consumo[sid], procesos_presion[sid])
+                    lectura = Reading(**datos)
+                    sesion.add(lectura)
 
-                nuevas_alertas = evaluar_reglas_alertas(
-                    lectura,
-                    estado.medias_moviles_eficiencia[sid],
-                    estado.medias_moviles_presion[sid],
-                    estado.conteo_baja_eficiencia
-                )
-                for alerta in nuevas_alertas:
-                    sesion.add(alerta)
-                    sesion.commit()
-                    _difundir({
-                        "type": "alert",
-                        "payload": {
-                            "id": alerta.id,
-                            "sector_id": alerta.sector_id,
-                            "nivel": alerta.nivel,
-                            "tipo": alerta.tipo,
-                            "ts": alerta.ts.isoformat(),
-                        }
-                    })
+                    nuevas = evaluar_reglas_alertas(
+                        lectura,
+                        estado.medias_moviles_eficiencia[sid],
+                        estado.medias_moviles_presion[sid],
+                        estado.conteo_baja_eficiencia
+                    )
+                    for alerta in nuevas:
+                        sesion.add(alerta)
+                        _difundir({
+                            "type": "alert",
+                            "payload": {
+                                "id": alerta.id, "sector_id": alerta.sector_id,
+                                "nivel": alerta.nivel, "tipo": alerta.tipo,
+                                "ts": alerta.ts.isoformat(),
+                            }
+                        })
 
-                estado.ventana_tendencia[sid].append(lectura.eficiencia)
+                    estado.ventana_tendencia[sid].append(lectura.eficiencia)
 
         _difundir({"type": "tick", "payload": {"ts": instante.isoformat()}})
         await asyncio.sleep(intervalo_segundos)

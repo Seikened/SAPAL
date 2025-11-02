@@ -12,18 +12,17 @@ from ..schemas import (
     AckRequest,
     AckResponse,
 )
-# Importa el servicio y usa los nombres en español:
 from ..services import sim as servicios_sim
 
 router = APIRouter()
 
 
 @router.get("/kpis/current", response_model=KPIResponse)
-def obtener_kpis_actuales():
+async def obtener_kpis_actuales():
     """
     Devuelve los KPIs del encabezado del tablero.
     """
-    datos = servicios_sim.calcular_kpis()
+    datos = await servicios_sim.calcular_kpis()
     return {
         "ts": datos["ts"],
         "eficiencia": round(datos["eficiencia"], 3),
@@ -34,32 +33,32 @@ def obtener_kpis_actuales():
 
 
 @router.get("/sectors", response_model=SectorsResponse)
-def obtener_sectores():
+async def obtener_sectores():
     """
     Devuelve la cuadrícula de sectores para el dashboard.
     """
-    elementos = servicios_sim.construir_cuadricula_sectores()
+    elementos = await servicios_sim.construir_cuadricula_sectores()
     return {"items": elementos}
 
 
 @router.get("/alerts", response_model=AlertsResponse)
-def obtener_alertas(estado: str = "abierta"):
+async def obtener_alertas(estado: str = "abierta"):
     """
     Devuelve el listado de alertas filtrado por estado.
     """
-    elementos = servicios_sim.listar_alertas(estado=estado)
+    elementos = await servicios_sim.listar_alertas(estado=estado)
     return {"items": elementos}
 
 
 @router.post("/alerts/{id_alerta}/ack", response_model=AckResponse)
-def marcar_alerta_como_atendida(id_alerta: int, cuerpo: AckRequest):
+async def marcar_alerta_como_atendida(id_alerta: int, cuerpo: AckRequest):
     """
     Marca una alerta como 'atendida' (ACK) validando un PIN de demostración.
     """
     if cuerpo.pin != "2131":
         raise HTTPException(status_code=403, detail="PIN inválido")
 
-    resultado = servicios_sim.atender_alerta(
+    resultado = await servicios_sim.atender_alerta(
         id_alerta=id_alerta,
         correo_usuario="operador@sapal.mx",
         nota=cuerpo.nota,
@@ -91,9 +90,11 @@ async def flujo_eventos(request: Request):
                 break
             yield f"data: {json.dumps(paquete)}\n\n"
 
-    cabeceras = {
-        "Cache-Control": "no-cache",
-        "Content-Type": "text/event-stream",
-        "Connection": "keep-alive",
-    }
-    return StreamingResponse(generador_eventos(), headers=cabeceras)
+    return StreamingResponse(
+        generador_eventos(),
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+        media_type="text/event-stream",
+    )

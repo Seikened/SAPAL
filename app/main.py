@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
     Al apagar:
       - Detiene la simulación en segundo plano limpiamente.
     """
-    init_db()
+    await init_db()
     await iniciar_simulacion_segundo_plano()
     try:
         yield
