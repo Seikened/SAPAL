@@ -29,13 +29,13 @@ export function AssistantButton() {
 
       if (message.toLowerCase().includes("atención") || message.toLowerCase().includes("requieren")) {
         response =
-          "Los sectores que requieren atención prioritaria hoy son:\n\n1. **Sector 233** - Posible fuga con +12% consumo no facturable\n2. **Sector 201** - Fuga confirmada, pérdida energética alta\n3. **Sector 145** - Baja disponibilidad prevista mañana\n\nTe muestro el Sector 233 primero porque su consumo no cobrado subió 12% respecto a su propio histórico, no por comparación con otro sector. Esto no es estacional."
+          "Los sectores que requieren atención prioritaria hoy son:\n\n1. Sector 233 - Posible fuga con +12% consumo no facturable\n2. Sector 201 - Fuga confirmada, pérdida energética alta\n3. Sector 145 - Baja disponibilidad prevista mañana\n\nTe muestro el Sector 233 primero porque su consumo no cobrado subió 12% respecto a su propio histórico, no por comparación con otro sector. Esto no es estacional."
       } else if (message.toLowerCase().includes("fugas")) {
         response =
-          "Top 5 sectores con mayor probabilidad de fuga:\n\n1. **Sector 233** (85% probabilidad) - Consumo no facturable +12%\n2. **Sector 201** (92% probabilidad) - Fuga confirmada\n3. **Sector 089** (45% probabilidad) - Variación presión anómala\n4. **Sector 312** (38% probabilidad) - Consumo nocturno elevado\n5. **Sector 078** (25% probabilidad) - Patrón irregular\n\nLa probabilidad se calcula considerando: consumo no facturable, variación de presión, histórico del sector, y reportes de campo."
+          "Top 5 sectores con mayor probabilidad de fuga:\n\n1. Sector 233 (85% probabilidad) - Consumo no facturable +12%\n2. Sector 201 (92% probabilidad) - Fuga confirmada\n3. Sector 089 (45% probabilidad) - Variación presión anómala\n4. Sector 312 (38% probabilidad) - Consumo nocturno elevado\n5. Sector 078 (25% probabilidad) - Patrón irregular\n\nLa probabilidad se calcula considerando: consumo no facturable, variación de presión, histórico del sector, y reportes de campo."
       } else if (message.toLowerCase().includes("eficiencia") || message.toLowerCase().includes("energética")) {
         response =
-          "Sectores con mayor pérdida de eficiencia energética:\n\n1. **Sector 201** - 62% eficiencia (pérdida: 4,200 m³/mes)\n2. **Sector 233** - 68% eficiencia (pérdida: 4,800 m³/mes)\n3. **Sector 078** - 75% eficiencia (pérdida: 2,100 m³/mes)\n\nEstas pérdidas representan alto costo energético en bombeo. Recomiendo priorizar inspección en Sectores 233 y 201."
+          "Sectores con mayor pérdida de eficiencia energética:\n\n1. Sector 201 - 62% eficiencia (pérdida: 4,200 m³/mes)\n2. Sector 233 - 68% eficiencia (pérdida: 4,800 m³/mes)\n3. Sector 078 - 75% eficiencia (pérdida: 2,100 m³/mes)\n\nEstas pérdidas representan alto costo energético en bombeo. Recomiendo priorizar inspección en Sectores 233 y 201."
       } else {
         response =
           "Entiendo tu consulta. Puedo ayudarte con información sobre sectores en riesgo, fugas probables, eficiencia energética, y predicciones de demanda. ¿Sobre qué te gustaría saber más?"

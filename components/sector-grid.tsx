@@ -53,7 +53,7 @@ export function SectorGrid() {
     <>
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="font-heading text-xl font-semibold tracking-tight">**Mapa de Sectores**</h2>
+          <h2 className="font-heading text-xl font-semibold tracking-tight">Mapa de Sectores</h2>
           <div className="flex gap-2">
             <Badge variant="outline" className="bg-success/10 border-success text-success text-xs font-medium">Normal</Badge>
             <Badge variant="outline" className="bg-warning/10 border-warning text-warning text-xs font-medium">Alerta</Badge>

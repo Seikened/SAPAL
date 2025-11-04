@@ -33,12 +33,13 @@ export function DashboardHeader() {
       <div className="container mx-auto px-4 py-4">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground">**Sistema de Agua Potable - León**</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">**Dashboard Operativo**</p>
+            <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground">Sistema de Agua Potable - León</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Dashboard Operativo</p>
           </div>
           <div className="text-right">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">**Última actualización**</p>
-            <p className="text-sm font-medium tabular-nums mt-0.5">{new Date(kpis.ts).toLocaleTimeString("es-MX")}</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Última actualización</p>
+
+            <p className="text-sm font-medium tabular-nums mt-0.5">{new Date(kpis.ts).toLocaleTimeString("es-MX" )}</p>
           </div>
         </div>
 
@@ -46,7 +47,7 @@ export function DashboardHeader() {
           <Card className="p-4">
             <div className="flex items-start justify-between">
               <div className="min-w-0">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">**Eficiencia Global**</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Eficiencia Global</p>
                 <p className={`text-3xl font-bold tabular-nums leading-none ${statusEfic}`}>
                   {fmtPct(kpis.eficiencia)}{" "}
                   <span className="text-sm font-medium text-muted-foreground align-middle">
@@ -57,7 +58,7 @@ export function DashboardHeader() {
                 <div className="mt-2 text-muted-foreground">
                   <Sparkline data={trend} className={`${statusEfic}`} />
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">**Consumo / Inyección (promedio por tick)**</p>
+                <p className="text-xs text-muted-foreground mt-1">Consumo / Inyección (promedio por tick)</p>
               </div>
               <Activity className={`h-8 w-8 ${statusEfic}`} />
             </div>
@@ -66,9 +67,9 @@ export function DashboardHeader() {
           <Card className="p-4">
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">**Tiempo de Decisión**</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Tiempo de Decisión</p>
                 <p className="text-3xl font-bold tabular-nums leading-none text-success">{kpis.tiempo_decision_min} min</p>
-                <p className="text-xs text-muted-foreground mt-2">**Promedio últimas 24h**</p>
+                <p className="text-xs text-muted-foreground mt-2">Promedio últimas 24h</p>
               </div>
               <Clock className="h-8 w-8 text-success" />
             </div>
@@ -77,11 +78,11 @@ export function DashboardHeader() {
           <Card className="p-4">
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">**Alertas**</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Alertas</p>
                 <p className={`text-3xl font-bold tabular-nums leading-none ${riesgosClass}`}>
-                  {kpis.sectores_en_riesgo} <span className="text-base font-medium text-muted-foreground">**sectores en riesgo**</span>
+                  {kpis.sectores_en_riesgo} <span className="text-base font-medium text-muted-foreground">sectores en riesgo</span>
                 </p>
-                <p className="text-xs text-muted-foreground mt-2">**Atendidas (24h):** <span className="font-medium text-foreground">{kpis.alertas_atendidas_24h}</span></p>
+                <p className="text-xs text-muted-foreground mt-2">Atendidas (24h): <span className="font-medium text-foreground">{kpis.alertas_atendidas_24h}</span></p>
               </div>
               <AlertTriangle className={`h-8 w-8 ${riesgosClass}`} />
             </div>

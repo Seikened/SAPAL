@@ -64,7 +64,7 @@ export function AlertsPanel() {
   return (
     <div className="space-y-6">
       <div className="space-y-4">
-        <h2 className="font-heading text-xl font-semibold tracking-tight">**Alertas Prioritarias**</h2>
+        <h2 className="font-heading text-xl font-semibold tracking-tight">Alertas Prioritarias</h2>
         <div className="space-y-3">
           {sorted.map((a) => {
             const Icon = iconFor(a.tipo);
@@ -87,14 +87,14 @@ export function AlertsPanel() {
                       {a.impacto_m3_mes && (
                         <div>
                           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-                            **Impacto estimado**
+                            Impacto estimado
                           </p>
                           <p className="text-sm leading-relaxed">{a.impacto_m3_mes.toLocaleString("es-MX")} m³/mes</p>
                         </div>
                       )}
                       <div>
                         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-                          **Siguiente acción**
+                          Siguiente acción
                         </p>
                         <p className="text-sm leading-relaxed">{a.recomendacion}</p>
                       </div>
@@ -126,7 +126,7 @@ export function AlertsPanel() {
       </div>
 
       <div className="space-y-4">
-        <h2 className="font-heading text-xl font-semibold tracking-tight">**Predicción a Corto Plazo**</h2>
+        <h2 className="font-heading text-xl font-semibold tracking-tight">Predicción a Corto Plazo</h2>
         <Card className="p-4 space-y-3 bg-accent/50">
           <div className="flex items-start gap-3">
             <div className="p-2 rounded-lg bg-primary/10">
@@ -134,7 +134,7 @@ export function AlertsPanel() {
             </div>
             <div className="flex-1 space-y-2">
               <h3 className="font-heading text-base font-semibold leading-tight tracking-tight">
-                **Predicción demo: variabilidad por calor**
+                Predicción demo: variabilidad por calor
               </h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 La demanda subirá en horas cálidas; monitorea sectores con pérdidas históricas altas.
