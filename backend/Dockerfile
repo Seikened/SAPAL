@@ -11,7 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip && \
-    pip install "fastapi>=0.111" "uvicorn[standard]>=0.30"
+    pip install "fastapi>=0.111" "uvicorn[standard]>=0.30" "sqlmodel>=0.0.21" "aiosqlite>=0.20"
 
-# Contexto = ./backend, así que aquí está main.py, routers/, etc.
-COPY .
+# Contexto = ./backend; esto deja el paquete en /app/backend
+COPY . /app/backend
+
+# Opcional: expone el puerto para documentación
+EXPOSE 8000

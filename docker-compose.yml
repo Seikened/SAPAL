@@ -8,9 +8,6 @@ services:
     working_dir: /app
     volumes:
       - ./backend:/app/backend
-      - ./app.db:/app/app.db
-      - ./app.db-wal:/app/app.db-wal
-      - ./app.db-shm:/app/app.db-shm
     ports:
       - "8000:8000"
     environment:
@@ -19,12 +16,12 @@ services:
   frontend:
     container_name: sapal-frontend
     build:
-      context: .
+      context: ./frontend
       dockerfile: Dockerfile
     command: ["pnpm", "dev", "-p", "3000", "-H", "0.0.0.0"]
     working_dir: /app
     volumes:
-      - ./:/app
+      - ./frontend:/app
       - /app/node_modules
     ports:
       - "3000:3000"
