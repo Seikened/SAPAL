@@ -16,6 +16,11 @@ services:
       - PYTHONPATH=/app
       # Si usaras SQLite fuera del repo, podrías definir:
       # - DATABASE_URL=sqlite:////app/data/app.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
     networks:
       default:
         aliases:
@@ -24,20 +29,27 @@ services:
 
   frontend:
     container_name: sapal-frontend
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    command: ["pnpm", "dev", "-p", "3000", "-H", "0.0.0.0"]
+    image: node:20-alpine
     working_dir: /app
+    command: >
+      sh -c "corepack enable &&
+             corepack prepare pnpm@latest --activate &&
+             pnpm install &&
+             pnpm dev -p 3000 -H 0.0.0.0"
     volumes:
       - ./frontend:/app
       - /app/node_modules
     ports:
       - "3333:3000"
     environment:
-      - NEXT_PUBLIC_API_BASE=http://sapal-backend:8000
+      - NEXT_PUBLIC_API_BASE=http://backend:8000
+      - NEXT_DISABLE_TURBOPACK=1
+      - NEXT_TELEMETRY_DISABLED=1
+      - CHOKIDAR_USEPOLLING=1
+      - WATCHPACK_POLLING=true
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 networks:
   default:

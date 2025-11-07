@@ -1,8 +1,8 @@
 const nextConfig = {
   async rewrites() {
     return [
-      { source: '/sim/:path*', destination: 'http://sapal-backend:8000/sim/:path*' },
-      { source: '/health',     destination: 'http://sapal-backend:8000/health' },
+      { source: '/sim/:path*', destination: 'http://backend:8000/sim/:path*' },
+      { source: '/health',     destination: 'http://backend:8000/health' },
     ];
   },
   allowedDevOrigins: [
