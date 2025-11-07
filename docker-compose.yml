@@ -4,14 +4,18 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
     working_dir: /app
     volumes:
       - ./backend:/app/backend
+      - ./data:/app/data
     ports:
       - "8081:8000"
     environment:
       - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      # Si usaras SQLite fuera del repo, podrías definir:
+      # - DATABASE_URL=sqlite:////app/data/app.db
 
   frontend:
     container_name: sapal-frontend
