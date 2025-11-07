@@ -14,4 +14,4 @@ RUN pip install --upgrade pip && \
     pip install "fastapi>=0.111" "uvicorn[standard]>=0.30"
 
 # Contexto = ./backend, así que aquí está main.py, routers/, etc.
-COPY . /app
+COPY .

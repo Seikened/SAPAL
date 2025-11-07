@@ -4,10 +4,13 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
     working_dir: /app
     volumes:
-      - ./backend:/app
+      - ./backend:/app/backend
+      - ./app.db:/app/app.db
+      - ./app.db-wal:/app/app.db-wal
+      - ./app.db-shm:/app/app.db-shm
     ports:
       - "8000:8000"
     environment:
