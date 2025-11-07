@@ -16,6 +16,10 @@ services:
       - PYTHONPATH=/app
       # Si usaras SQLite fuera del repo, podrías definir:
       # - DATABASE_URL=sqlite:////app/data/app.db
+    networks:
+      default:
+        aliases:
+          - backend
 
   frontend:
     container_name: sapal-frontend
@@ -30,7 +34,7 @@ services:
     ports:
       - "3333:3000"
     environment:
-      - NEXT_PUBLIC_API_BASE=http://backend:8000
+      - NEXT_PUBLIC_API_BASE=http://sapal-backend:8000
     depends_on:
       - backend
 
